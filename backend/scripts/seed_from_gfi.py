@@ -20,7 +20,11 @@ async def seed_from_gfi(csv_path: str = "data/gfi_companies.csv"):
     print("Full implementation coming in Sprint 1b.")
 
 
-async def seed_from_json(json_path: str = "data/seed_data.json"):
+async def seed_from_json(json_path: str = None):
+    # Resolve path relative to project root (one level up from backend/)
+    if json_path is None:
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        json_path = os.path.join(project_root, "data", "seed_data.json")
     """
     Import sample seed data for testing. Run this now to populate the DB.
     """
@@ -51,8 +55,8 @@ async def seed_from_json(json_path: str = "data/seed_data.json"):
             session.add(company)
 
         await session.commit()
-        print(f"[Seed] ✅ Inserted {len(data.get('companies', []))} companies.")
-        print("[Seed] ✅ Sample data seeded successfully.")
+        print(f"[Seed] OK - Inserted {len(data.get('companies', []))} companies.")
+        print("[Seed] DONE - Sample data seeded successfully.")
 
 
 if __name__ == "__main__":
