@@ -60,3 +60,14 @@ async def with_exponential_backoff(
                 raise
             delay = min(base_delay * (2 ** attempt), max_delay)
             await asyncio.sleep(delay)
+
+
+class RateLimiter(AsyncSemaphoreRateLimiter):
+    """
+    Alias for AsyncSemaphoreRateLimiter with a friendlier constructor.
+    Usage: RateLimiter(concurrency=5, calls_per_second=2.0)
+    """
+    def __init__(self, concurrency: int = 10, calls_per_second: float = 0.0):
+        min_interval = (1.0 / calls_per_second) if calls_per_second > 0 else 0.0
+        super().__init__(max_concurrent=concurrency, min_interval=min_interval)
+
