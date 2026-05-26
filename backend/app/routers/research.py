@@ -22,8 +22,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.database.session import get_db
-from app.database.models import Company, Individual
-from app.services import opencorporates_service, hunter_service, serper_service
+from app.database.models import Company, Individual, DISCType
+from app.services import opencorporates_service, hunter_service, serper_service, humantic_service
 from app.utils.cache_manager import is_cache_fresh, cache_age_hours
 from app.config import settings
 
@@ -382,8 +382,127 @@ async def batch_enrich_serper_individuals(
 
 
 # ════════════════════════════════════════════════════════════
-#  Phase 5 stub — Humantic AI
+#  Phase 5 — Humantic AI Personality Profiling
 # ════════════════════════════════════════════════════════════
+
+@router.post("/individual/{individual_id}/humantic")
+async def enrich_individual_humantic(
+    individual_id: str,
+    force_refresh: bool = False,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Run Humantic AI personality profiling for an individual.
+    Fetches DISC type, Big Five personality scores, and communication preferences.
+    Results are used as tone_instruction in LLM Call 1 (Individual Analysis).
+    Requires: HUMANTIC_API_KEY in .env and individual.linkedin_url to be set.
+    TTL: 90 days (personality is stable).
+    """
+    stmt = select(Individual).where(Individual.id == individual_id)
+    result = await db.execute(stmt)
+    individual = result.scalar_one_or_none()
+    if not individual:
+        raise HTTPException(status_code=404, detail="Individual not found")
+
+    enrichment = await humantic_service.enrich_individual(
+        individual, db, force_refresh=force_refresh
+    )
+    await db.commit()
+    return enrichment
+
+
+@router.post("/individual/{individual_id}/enrich-all")
+async def enrich_individual_all(
+    individual_id: str,
+    force_refresh: bool = False,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Run all individual enrichment in one call:
+      1. Hunter.io email finder (14-day TTL)
+      2. Serper mention search (7-day TTL)
+      3. Humantic AI personality profile (90-day TTL)
+    Returns a combined summary ready for LLM Call 1.
+    """
+    stmt = select(Individual).where(Individual.id == individual_id)
+    result = await db.execute(stmt)
+    individual = result.scalar_one_or_none()
+    if not individual:
+        raise HTTPException(status_code=404, detail="Individual not found")
+
+    # Load company for domain extraction
+    if individual.company_id:
+        comp = await db.execute(select(Company).where(Company.id == individual.company_id))
+        individual.company = comp.scalar_one_or_none()
+
+    hunter_result = await hunter_service.enrich_individual_email(
+        individual, db, force_refresh=force_refresh
+    )
+    serper_result = await serper_service.enrich_individual(
+        individual, db, force_refresh=force_refresh
+    )
+    humantic_result = await humantic_service.enrich_individual(
+        individual, db, force_refresh=force_refresh
+    )
+    await db.commit()
+
+    return {
+        "individual_id": individual_id,
+        "name": individual.name,
+        "hunter": hunter_result,
+        "serper": serper_result,
+        "humantic": humantic_result,
+        "ready_for_llm": {
+            "email": individual.email,
+            "disc_type": individual.humantic_disc.value if individual.humantic_disc else "UNKNOWN",
+            "communication_pref": individual.humantic_communication_pref,
+            "has_serper_signals": bool(individual.serper_individual_cache),
+        },
+    }
+
+
+@router.get("/disc/{disc_type}")
+async def get_disc_instructions(disc_type: str):
+    """
+    Return tone and avoid instructions for a given DISC type.
+    Useful for the frontend to display persona guidance.
+    Valid values: D, I, S, C, UNKNOWN
+    """
+    try:
+        disc = DISCType(disc_type.upper())
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid DISC type '{disc_type}'. Must be one of: D, I, S, C, UNKNOWN"
+        )
+    return humantic_service.get_disc_instructions(disc)
+
+
+@router.post("/batch/humantic")
+async def batch_enrich_humantic(
+    individual_ids: list[str] = Body(..., description="List of individual IDs to enrich"),
+    force_refresh: bool = False,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Batch Humantic AI profiling for multiple individuals.
+    Requires each individual to have linkedin_url set.
+    Max 20 individuals per call (Humantic rate limits).
+    """
+    if len(individual_ids) > 20:
+        raise HTTPException(status_code=400, detail="Max 20 individuals per Humantic batch call.")
+
+    results = await humantic_service.batch_enrich_individuals(
+        individual_ids, db, force_refresh=force_refresh
+    )
+    return {
+        "total": len(results),
+        "enriched": sum(1 for r in results if r.get("status") == "enriched"),
+        "cached": sum(1 for r in results if r.get("status") == "cached"),
+        "no_linkedin": sum(1 for r in results if r.get("status") == "no_linkedin"),
+        "errors": sum(1 for r in results if r.get("status") == "error"),
+        "results": results,
+    }
 
 
 # ════════════════════════════════════════════════════════════
