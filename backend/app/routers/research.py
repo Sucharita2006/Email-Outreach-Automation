@@ -1,14 +1,21 @@
 """
-Research Router — Phase 3: OpenCorporates + Hunter.io endpoints
+Research Router — Phase 3 + 4: OpenCorporates, Hunter.io, Serper
 Exposes endpoints to trigger and retrieve enrichment for companies and individuals.
 
-Phase 3 endpoints:
-  POST /research/company/{id}/opencorporates   — Enrich company from OpenCorporates registry
-  POST /research/company/{id}/hunter           — Run Hunter.io domain search for company
-  POST /research/individual/{id}/hunter        — Find individual email via Hunter.io
-  POST /research/company/{id}/enrich-all       — Run both OpenCorporates + Hunter in one call
-  POST /research/batch/opencorporates          — Batch enrich multiple companies
-  GET  /research/company/{id}/status           — View current research cache status
+Phase 3 endpoints (live):
+  POST /research/company/{id}/opencorporates   — Enrich from OpenCorporates registry
+  POST /research/company/{id}/hunter           — Hunter.io domain search
+  POST /research/individual/{id}/hunter        — Hunter.io email finder
+  POST /research/company/{id}/enrich-all       — OC + Hunter + Serper in one call
+  POST /research/batch/opencorporates          — Batch OC enrichment
+  GET  /research/company/{id}/status           — Full research cache status
+  GET  /research/individual/{id}/status        — Individual cache status
+
+Phase 4 endpoints (live):
+  POST /research/company/{id}/serper           — Serper news + web search
+  POST /research/individual/{id}/serper        — Serper individual mention search
+  POST /research/batch/serper/companies        — Batch Serper for companies
+  POST /research/batch/serper/individuals      — Batch Serper for individuals
 """
 from fastapi import APIRouter, Depends, HTTPException, Body
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,7 +23,7 @@ from sqlalchemy import select
 
 from app.database.session import get_db
 from app.database.models import Company, Individual
-from app.services import opencorporates_service, hunter_service
+from app.services import opencorporates_service, hunter_service, serper_service
 from app.utils.cache_manager import is_cache_fresh, cache_age_hours
 from app.config import settings
 
@@ -139,12 +146,13 @@ async def enrich_company_all(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Run all Phase 3 enrichment for a single company:
-      1. OpenCorporates (registry data)
-      2. Hunter.io (email contacts)
+    Run all Phase 3+4 enrichment for a single company in one call:
+      1. OpenCorporates (registry data, 30-day TTL)
+      2. Hunter.io (email contacts, 14-day TTL)
+      3. Serper (news + web intelligence, 7-day TTL)
 
-    Each step is independently cached and skipped if fresh.
-    Returns a combined summary.
+    Each step is independently cached and skipped if still fresh.
+    Returns a combined summary of all three enrichment results.
     """
     company = await _get_company_or_404(company_id, db)
 
@@ -154,6 +162,9 @@ async def enrich_company_all(
     hunter_result = await hunter_service.enrich_company_contacts(
         company, db, force_refresh=force_refresh
     )
+    serper_result = await serper_service.enrich_company(
+        company, db, force_refresh=force_refresh
+    )
     await db.commit()
 
     return {
@@ -161,6 +172,7 @@ async def enrich_company_all(
         "company_name": company.name,
         "opencorporates": oc_result,
         "hunter": hunter_result,
+        "serper": serper_result,
     }
 
 
@@ -275,25 +287,103 @@ async def individual_research_status(
 
 
 # ════════════════════════════════════════════════════════════
-#  Stubs for later phases (Serper, Humantic, LLM orchestrator)
+#  Phase 4 — Serper Web + News Search
 # ════════════════════════════════════════════════════════════
 
 @router.post("/company/{company_id}/serper")
-async def enrich_company_serper(company_id: str, db: AsyncSession = Depends(get_db)):
-    """Serper web + news search enrichment — Phase 4."""
-    return {"status": "stub", "message": "Phase 4: Serper integration", "company_id": company_id}
-
-
-@router.post("/individual/{individual_id}/humantic")
-async def enrich_individual_humantic(individual_id: str, db: AsyncSession = Depends(get_db)):
-    """Humantic AI personality profiling — Phase 5."""
-    return {"status": "stub", "message": "Phase 5: Humantic integration", "individual_id": individual_id}
+async def enrich_company_serper(
+    company_id: str,
+    force_refresh: bool = False,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Run Serper Google News + Web search for a company.
+    Extracts news hooks (for email openers) and web intelligence (for LLM context).
+    Caches results for 7 days.
+    Requires: SERPER_API_KEY in .env
+    """
+    company = await _get_company_or_404(company_id, db)
+    result = await serper_service.enrich_company(company, db, force_refresh=force_refresh)
+    await db.commit()
+    return result
 
 
 @router.post("/individual/{individual_id}/serper")
-async def enrich_individual_serper(individual_id: str, db: AsyncSession = Depends(get_db)):
-    """Serper public mention search for individual — Phase 4."""
-    return {"status": "stub", "message": "Phase 4: Serper integration", "individual_id": individual_id}
+async def enrich_individual_serper(
+    individual_id: str,
+    force_refresh: bool = False,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Run Serper web search for an individual's public presence:
+    mentions, conference talks, articles, podcasts.
+    Used to build the key_hook for LLM Call 1 (Individual Analysis).
+    Requires: SERPER_API_KEY in .env
+    """
+    stmt = select(Individual).where(Individual.id == individual_id)
+    result = await db.execute(stmt)
+    individual = result.scalar_one_or_none()
+    if not individual:
+        raise HTTPException(status_code=404, detail="Individual not found")
+
+    enrichment = await serper_service.enrich_individual(
+        individual, db, force_refresh=force_refresh
+    )
+    await db.commit()
+    return enrichment
+
+
+@router.post("/batch/serper/companies")
+async def batch_enrich_serper_companies(
+    company_ids: list[str] = Body(..., description="List of company IDs"),
+    force_refresh: bool = False,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Batch run Serper enrichment for multiple companies.
+    Max 50 companies per call. Each uses ~2 Serper credits (news + web).
+    """
+    if len(company_ids) > 50:
+        raise HTTPException(status_code=400, detail="Max 50 companies per batch call.")
+
+    results = await serper_service.batch_enrich_companies(
+        company_ids, db, force_refresh=force_refresh
+    )
+    return {
+        "total": len(results),
+        "ok": sum(1 for r in results if r.get("status") in ("ok", "cached")),
+        "errors": sum(1 for r in results if r.get("status") == "error"),
+        "results": results,
+    }
+
+
+@router.post("/batch/serper/individuals")
+async def batch_enrich_serper_individuals(
+    individual_ids: list[str] = Body(..., description="List of individual IDs"),
+    force_refresh: bool = False,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Batch run Serper enrichment for multiple individuals.
+    Max 50 individuals per call.
+    """
+    if len(individual_ids) > 50:
+        raise HTTPException(status_code=400, detail="Max 50 individuals per batch call.")
+
+    results = await serper_service.batch_enrich_individuals(
+        individual_ids, db, force_refresh=force_refresh
+    )
+    return {
+        "total": len(results),
+        "ok": sum(1 for r in results if r.get("status") in ("ok", "cached")),
+        "errors": sum(1 for r in results if r.get("status") == "error"),
+        "results": results,
+    }
+
+
+# ════════════════════════════════════════════════════════════
+#  Phase 5 stub — Humantic AI
+# ════════════════════════════════════════════════════════════
 
 
 # ════════════════════════════════════════════════════════════
