@@ -1,0 +1,47 @@
+{
+  "gfi_product_type_to_domain_tags": {
+    "plant-based meat": ["plant-based", "alternative-protein", "veganism"],
+    "plant-based dairy": ["plant-based", "alternative-protein", "veganism", "cruelty-free"],
+    "plant-based egg": ["plant-based", "alternative-protein", "veganism"],
+    "plant-based seafood": ["plant-based", "alternative-protein", "sustainable-food"],
+    "cultivated meat": ["cultivated-meat", "alternative-protein", "animal-welfare"],
+    "cultivated seafood": ["cultivated-meat", "alternative-protein", "sustainable-food"],
+    "fermentation-derived protein": ["alternative-protein", "food-tech", "sustainable-food"],
+    "whole food plant-based": ["plant-based", "veganism", "sustainable-food"],
+    "ingredient supplier": ["alternative-protein", "food-tech"],
+    "manufacturer": ["alternative-protein", "food-tech"],
+    "consumer brand": ["plant-based", "veganism", "vegan-business"],
+    "retail": ["vegan-business", "plant-based"],
+    "foodservice": ["plant-based", "sustainable-food"],
+    "technology": ["food-tech", "alternative-protein"],
+    "research": ["alternative-protein", "food-tech"],
+    "finance/investment": ["conscious-capitalism", "alternative-protein"],
+    "consulting": ["vegan-business", "alternative-protein"],
+    "b2b services": ["vegan-business"],
+    "other": ["animal-welfare", "veganism"]
+  },
+
+  "irs_ntee_to_domain_tags": {
+    "D20": ["animal-welfare", "animal-rights"],
+    "D30": ["animal-welfare", "sustainable-food"],
+    "D61": ["animal-rights", "animal-welfare"],
+    "D01": ["animal-welfare"],
+    "D99": ["animal-welfare"]
+  },
+
+  "keyword_to_domain_tags": {
+    "vegan": ["veganism", "plant-based", "cruelty-free"],
+    "plant-based": ["plant-based", "alternative-protein"],
+    "animal welfare": ["animal-welfare", "animal-rights"],
+    "factory farming": ["factory-farming", "animal-welfare"],
+    "sustainable": ["sustainable-food", "food-policy"],
+    "cruelty-free": ["cruelty-free", "veganism", "humane-cosmetics"],
+    "cultivated": ["cultivated-meat", "alternative-protein"],
+    "fermentation": ["alternative-protein", "food-tech"],
+    "food tech": ["food-tech", "alternative-protein"],
+    "conscious": ["conscious-capitalism"],
+    "humane": ["animal-welfare", "humane-cosmetics"],
+    "vegan fashion": ["vegan-fashion", "cruelty-free"],
+    "pet food": ["pet-food-reform"]
+  }
+}

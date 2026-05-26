@@ -1,0 +1,95 @@
+# ============================================================
+#  Email Outreach Automation — .gitignore
+# ============================================================
+
+# ── Environment & Secrets ────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+
+# ── Python ───────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+parts/
+var/
+sdist/
+develop-eggs/
+.installed.cfg
+lib/
+lib64/
+pip-wheel-metadata/
+
+# ── Virtual Environments ─────────────────────────────────────
+venv/
+.venv/
+ENV/
+env/
+.env/
+
+# ── Database files ────────────────────────────────────────────
+*.db
+*.sqlite
+*.sqlite3
+outreach.db
+
+# ── Alembic ──────────────────────────────────────────────────
+# Keep versions directory but ignore local state
+backend/alembic.ini.local
+
+# ── IDE & Editor ─────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ── Logs ─────────────────────────────────────────────────────
+*.log
+logs/
+*.out
+
+# ── Testing ──────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# ── Node / Frontend ──────────────────────────────────────────
+node_modules/
+frontend/dist/
+frontend/.next/
+frontend/build/
+*.local
+
+# ── Cache ────────────────────────────────────────────────────
+.cache/
+*.cache
+
+# ── OS ───────────────────────────────────────────────────────
+.DS_Store
+ehthumbs.db
+Desktop.ini
+
+# ── Research & Seed Data (keep schema, not raw dumps) ────────
+data/raw/
+data/dumps/
+*.csv.bak
+
+# ── Google OAuth Tokens ──────────────────────────────────────
+token.json
+token.pickle
+credentials.json

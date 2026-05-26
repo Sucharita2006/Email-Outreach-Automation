@@ -1,0 +1,55 @@
+{
+  "_comment": "Sample seed data for testing. Replace with real GFI CSV import in Sprint 1b.",
+  "companies": [
+    {
+      "name": "Beyond Meat",
+      "website": "https://www.beyondmeat.com",
+      "linkedin_url": "https://www.linkedin.com/company/beyond-meat",
+      "description": "Leading producer of plant-based meat products.",
+      "industry": "Food & Beverage",
+      "sector": "consumer brand",
+      "product_type": "plant-based meat",
+      "size": "500-1000",
+      "domain_tags": ["plant-based", "alternative-protein", "veganism"],
+      "source": "seed_data"
+    },
+    {
+      "name": "Impossible Foods",
+      "website": "https://www.impossiblefoods.com",
+      "linkedin_url": "https://www.linkedin.com/company/impossible-foods",
+      "description": "Makes meat from plants to restore biodiversity and reduce climate impact.",
+      "industry": "Food & Beverage",
+      "sector": "consumer brand",
+      "product_type": "plant-based meat",
+      "size": "500-1000",
+      "domain_tags": ["plant-based", "alternative-protein", "sustainable-food"],
+      "source": "seed_data"
+    },
+    {
+      "name": "Oatly",
+      "website": "https://www.oatly.com",
+      "linkedin_url": "https://www.linkedin.com/company/oatly",
+      "description": "Swedish oat drink company committed to sustainable food systems.",
+      "industry": "Food & Beverage",
+      "sector": "consumer brand",
+      "product_type": "plant-based dairy",
+      "size": "1000+",
+      "domain_tags": ["plant-based", "alternative-protein", "veganism", "sustainable-food"],
+      "source": "seed_data"
+    }
+  ],
+  "individuals": [
+    {
+      "name": "Jane Sample",
+      "first_name": "Jane",
+      "last_name": "Sample",
+      "role": "Head of Sustainability",
+      "email": "jane.sample@example.com",
+      "email_verified": false,
+      "linkedin_url": "https://www.linkedin.com/in/janesample",
+      "company_name": "Beyond Meat",
+      "domain_tags": ["plant-based", "sustainable-food"],
+      "source": "seed_data"
+    }
+  ]
+}

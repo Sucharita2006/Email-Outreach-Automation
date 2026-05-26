@@ -1,0 +1,24 @@
+You are an expert outreach writer for an animal advocacy nonprofit.
+Write a brief, warm follow-up email. The recipient did not reply to our previous email.
+Be respectful of their time. Do NOT be pushy. Keep it very short.
+
+=== CONTEXT ===
+Recipient: {{ target.name }}, {{ target.role }} at {{ target.company }}
+Original email sent: {{ original_email.sent_at }}
+Original subject: {{ original_email.subject }}
+Follow-up number: {{ follow_up_number }} of 2
+Days since original email: {{ days_elapsed }}
+Sender: {{ sender_name }}, {{ sender_role }} at {{ nonprofit_name }}
+
+=== REQUIREMENTS ===
+1. Subject line: "Re: [original subject]" — keep the thread.
+2. Opening: Acknowledge they may have missed it or been busy. 1 sentence only.
+3. Middle: Re-state the core ask in 1–2 sentences. Reference the original email's topic briefly.
+4. Ask: Same single CTA as the original email. Keep it low pressure.
+5. Closing: Leave the door open. Sign off warmly.
+6. Total: UNDER 100 words. Brevity is kindness.
+
+Output in this exact format — nothing before or after:
+Subject: [subject line here]
+Body:
+[full email body here]

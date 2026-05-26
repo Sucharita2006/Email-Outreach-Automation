@@ -1,0 +1,20 @@
+You are a research analyst for an animal advocacy nonprofit.
+Analyze this company and output a JSON object ONLY — no prose, no explanation, no markdown.
+
+Company data:
+- Legal name: {{ company.legal_name | default(company.name) }} ({{ company.company_type | default("Unknown type") }}, {{ company.jurisdiction_code | default("Unknown jurisdiction") }})
+- Sector: {{ company.sector | default("Unknown") }}, Product type: {{ company.product_type | default("Unknown") }}
+- Description: {{ company.description | default("Not available") }}
+- Recent news: {{ company.recent_news | join(" | ") if company.recent_news else "No recent news available" }}
+- Company intelligence: {{ company.web_intelligence | default("Not available") }}
+- Company status: {{ company.company_status | default("Active") }}, Incorporated: {{ company.incorporation_date | default("Unknown") }}
+
+Our nonprofit's mission: {{ nonprofit_mission }}
+
+Output this exact JSON and nothing else:
+{
+  "mission_fit": "1 sentence on why this specific company's work aligns with our animal advocacy mission. Be concrete, not generic.",
+  "news_hook": "The single strongest, most recent news item or event to reference in the email opening. Include the specific name of the event/article and date. If no news, say 'No recent news hook available'.",
+  "collaboration_angle": "1 concrete, specific way this company and our nonprofit could work together. Name a real type of partnership (e.g., co-branded campaign, supply chain audit, policy endorsement).",
+  "credibility_signal": "Something about this company that demonstrates they are serious about their stated values (e.g., B Corp certification, specific policy commitment, product launch date)."
+}
