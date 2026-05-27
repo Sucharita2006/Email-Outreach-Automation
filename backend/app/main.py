@@ -4,6 +4,9 @@ Complete implementation with APScheduler background job for follow-up automation
 """
 
 import logging
+
+logging.basicConfig(level=logging.INFO)
+logging.getLogger("discovery").setLevel(logging.INFO)
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI

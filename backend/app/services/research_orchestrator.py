@@ -308,33 +308,98 @@ async def run_email_draft(
 def _parse_email_output(raw: str) -> tuple[Optional[str], Optional[str]]:
     """
     Parse the LLM email output into (subject, body).
-    Expected format:
-      Subject: [subject line here]
-      Body:
-      [full email body here]
+    Uses multiple strategies to handle varied model output formats.
+
+    Handles:
+      - Subject: ... / Body: ...  (standard)
+      - **Subject:** ... (markdown bold)
+      - Subject line on first line, body after blank line
+      - Plain email with no labels at all
     """
+    if not raw or not raw.strip():
+        return None, None
+
+    raw = raw.strip()
     subject = None
     body = None
 
-    # Extract subject
-    subject_match = re.search(r"^Subject:\s*(.+)$", raw, re.MULTILINE | re.IGNORECASE)
+    # Strategy 1: Standard "Subject: ..." label (case-insensitive, optional **)
+    subject_match = re.search(
+        r"^\*{0,2}Subject\*{0,2}:\s*\*{0,2}(.+?)\*{0,2}\s*$",
+        raw, re.MULTILINE | re.IGNORECASE
+    )
     if subject_match:
-        subject = subject_match.group(1).strip()
+        subject = subject_match.group(1).strip().strip("*").strip()
 
-    # Extract body — everything after "Body:" line
-    body_match = re.search(r"^Body:\s*\n([\s\S]+)", raw, re.MULTILINE | re.IGNORECASE)
+    # Strategy 2: "Body:" label — everything after it
+    body_match = re.search(
+        r"^\*{0,2}Body\*{0,2}:\s*\n([\s\S]+)",
+        raw, re.MULTILINE | re.IGNORECASE
+    )
     if body_match:
         body = body_match.group(1).strip()
-    elif subject:
-        # Fallback: body is everything after the subject line
-        parts = raw.split("\n", 2)
-        if len(parts) >= 2:
-            body = "\n".join(parts[1:]).strip()
-            # Remove "Body:" prefix if present
-            if body.lower().startswith("body:"):
-                body = body[5:].strip()
+
+    # Strategy 3: No "Body:" label but subject found — body is everything after subject line
+    if subject and not body:
+        # Remove the subject line and any immediately following blank lines
+        after_subject = re.sub(
+            r"^\*{0,2}Subject\*{0,2}:.*\n?", "", raw, count=1, flags=re.IGNORECASE
+        ).lstrip("\n").strip()
+        if after_subject:
+            # Strip "Body:" prefix if present
+            if re.match(r"^\*{0,2}body\*{0,2}:", after_subject, re.IGNORECASE):
+                after_subject = re.sub(r"^\*{0,2}body\*{0,2}:\s*", "", after_subject, flags=re.IGNORECASE).strip()
+            body = after_subject
+
+    # Strategy 4: No labels at all — treat first line as subject, rest as body
+    if not subject and not body:
+        lines = raw.split("\n")
+        subject = lines[0].strip().strip("*")
+        body = "\n".join(lines[1:]).strip() if len(lines) > 1 else None
+
+    # Clean up any residual markdown bold from subject
+    if subject:
+        subject = subject.strip("*").strip()
+
+    # Strip model thinking/reasoning artifacts from body
+    if body:
+        body = _clean_body(body)
 
     return subject, body
+
+
+def _clean_body(body: str) -> str:
+    """
+    Strip model chain-of-thought artifacts from the email body.
+    Some free/thinking models append word counts, notes, or internal
+    reasoning after the email content despite being told not to.
+    """
+    # Patterns that signal the start of meta-commentary — truncate there
+    _STOP_PATTERNS = [
+        r"\bnow count\b",
+        r"\bword count\b",
+        r"\blet'?s count\b",
+        r"\blet me count\b",
+        r"^\s*note[:\s]",
+        r"^\s*---+\s*$",
+        r"^\s*\*\*note\*\*",
+        r"^\s*here'?s? (the |a |my )?email",
+        r"^\s*this email (is |has |uses )",
+        r"^\s*i (have |'ve )?(written|drafted|generated)",
+    ]
+
+    lines = body.split("\n")
+    cutoff = len(lines)
+    for i, line in enumerate(lines):
+        for pattern in _STOP_PATTERNS:
+            if re.search(pattern, line, re.IGNORECASE):
+                cutoff = i
+                break
+        if cutoff < len(lines):
+            break
+
+    return "\n".join(lines[:cutoff]).strip()
+
 
 
 # ════════════════════════════════════════════════════════════
@@ -441,58 +506,40 @@ async def batch_generate_emails(
 ) -> list[dict]:
     """
     Generate emails for multiple targets concurrently.
-
-    Args:
-        target_pairs: List of {individual_id, company_id} dicts.
-        campaign_id: The campaign to associate emails with.
-        concurrency: Max simultaneous LLM calls (default: settings.LLM_BATCH_CONCURRENCY).
-
-    Returns: List of per-target generation results.
+    Creates a new DB session per task to avoid SQLAlchemy concurrency errors.
     """
+    from app.database.session import AsyncSessionLocal
+    
     max_concurrent = concurrency or settings.LLM_BATCH_CONCURRENCY
     semaphore = asyncio.Semaphore(max_concurrent)
-
-    # Pre-load all individuals and companies
-    individual_ids = [p["individual_id"] for p in target_pairs]
-    company_ids = list(set(p["company_id"] for p in target_pairs))
-
-    ind_result = await db.execute(
-        select(Individual).where(Individual.id.in_(individual_ids))
-    )
-    comp_result = await db.execute(
-        select(Company).where(Company.id.in_(company_ids))
-    )
-
-    individuals = {i.id: i for i in ind_result.scalars().all()}
-    companies = {c.id: c for c in comp_result.scalars().all()}
 
     async def _generate_one(pair: dict) -> dict:
         ind_id = pair["individual_id"]
         comp_id = pair["company_id"]
-        individual = individuals.get(ind_id)
-        company = companies.get(comp_id)
-
-        if not individual:
-            return {"status": "error", "individual_id": ind_id, "error": "Individual not found"}
-        if not company:
-            return {"status": "error", "company_id": comp_id, "error": "Company not found"}
-
-        # Attach company relationship for context
-        individual.company = company
-
+        
         async with semaphore:
-            result = await generate_email_for_target(
-                individual=individual,
-                company=company,
-                campaign_id=campaign_id,
-                db=db,
-                force_refresh_analysis=force_refresh_analysis,
-            )
-            return result
+            async with AsyncSessionLocal() as task_db:
+                # Reload models within the thread-safe session
+                individual = await task_db.get(Individual, ind_id)
+                company = await task_db.get(Company, comp_id)
+
+                if not individual:
+                    return {"status": "error", "individual_id": ind_id, "error": "Individual not found"}
+                if not company:
+                    return {"status": "error", "company_id": comp_id, "error": "Company not found"}
+
+                individual.company = company
+
+                result = await generate_email_for_target(
+                    individual=individual,
+                    company=company,
+                    campaign_id=campaign_id,
+                    db=task_db,
+                    force_refresh_analysis=force_refresh_analysis,
+                )
+                await task_db.commit()
+                return result
 
     results = await asyncio.gather(*[_generate_one(pair) for pair in target_pairs])
-
-    # Commit all drafted emails at once
-    await db.commit()
 
     return list(results)

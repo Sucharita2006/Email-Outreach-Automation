@@ -176,6 +176,88 @@ async def generate_single_email(
     return result
 
 
+class CampaignTargetPair(BaseModel):
+    individual_id: str
+    company_id: str
+
+
+class CampaignTargetsRequest(BaseModel):
+    campaign_id: str
+    targets: list[CampaignTargetPair]
+    force_refresh_analysis: bool = False
+
+
+@router.post("/generate/campaign-targets")
+async def generate_emails_for_campaign_targets(
+    req: CampaignTargetsRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Generate one personalized email per selected target (individual + company pair).
+    Called by the frontend after the user selects from the discovery results.
+
+    Runs sequentially (not concurrently) to avoid hammering free LLM rate limits.
+    Returns a result per target so the frontend can show per-row status.
+    """
+    if not req.targets:
+        raise HTTPException(status_code=400, detail="targets list must not be empty.")
+    if len(req.targets) > 50:
+        raise HTTPException(status_code=400, detail="Max 50 targets per generation call.")
+
+    await _get_campaign_or_404(req.campaign_id, db)
+
+    # Convert Pydantic objects to dicts for batch_generate_emails
+    target_pairs_dicts = [
+        {"individual_id": p.individual_id, "company_id": p.company_id}
+        for p in req.targets
+    ]
+
+    # Run batch generation concurrently (respects LLM_BATCH_CONCURRENCY = 10)
+    batch_results = await research_orchestrator.batch_generate_emails(
+        target_pairs=target_pairs_dicts,
+        campaign_id=req.campaign_id,
+        db=db,
+        concurrency=settings.LLM_BATCH_CONCURRENCY,
+        force_refresh_analysis=req.force_refresh_analysis,
+    )
+
+    results = []
+    ok_count = 0
+
+    for res in batch_results:
+        if res.get("status") == "ok":
+            ok_count += 1
+            
+        results.append({
+            "individual_id": res.get("individual_id"),
+            "company_id": res.get("company_id"),
+            "individual_name": res.get("recipient_name"),
+            "company_name": res.get("company_name"),
+            "status": res.get("status"),
+            "subject": res.get("subject"),
+            "body": res.get("body"),
+            "email_id": res.get("email_id"),
+            "error": res.get("error"),
+        })
+
+    # Update campaign draft count
+    try:
+        campaign = await _get_campaign_or_404(req.campaign_id, db)
+        campaign.total_drafted = (campaign.total_drafted or 0) + ok_count
+        campaign.total_targets = (campaign.total_targets or 0) + len(req.targets)
+        await db.commit()
+    except Exception:
+        pass
+
+    return {
+        "campaign_id": req.campaign_id,
+        "total": len(results),
+        "ok": ok_count,
+        "errors": len(results) - ok_count,
+        "results": results,
+    }
+
+
 @router.post("/generate")
 async def generate_batch_emails(
     req: GenerateRequest,

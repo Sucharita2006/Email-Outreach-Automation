@@ -5,7 +5,7 @@ Targets Router — Phase 2: Full Implementation
 - Fuzzy domain search across companies + individuals
 - Domain tag filtering, known/new badge, pagination
 """
-from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi import APIRouter, Depends, Query, HTTPException, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, or_, cast, String
 from sqlalchemy.orm import selectinload
@@ -14,8 +14,9 @@ from typing import Optional
 from datetime import datetime
 
 from app.database.session import get_db
-from app.database.models import Company, Individual, DISCType
+from app.database.models import Company, Individual, DISCType, OutreachCampaign
 from app.utils.fuzzy_match import expand_domain_query
+from app.services import discovery_service
 
 router = APIRouter()
 
@@ -129,6 +130,115 @@ class SearchResult(BaseModel):
     total_individuals: int
     matched_domain_tags: list[str]
     query: str
+
+
+# ════════════════════════════════════════════════════════════
+#  Discover Targets — Domain-Driven Auto-Discovery
+# ════════════════════════════════════════════════════════════
+
+class DiscoverRequest(BaseModel):
+    campaign_name: str
+    domain: str
+    campaign_purpose: str
+    limit: int = 30
+
+
+class DiscoveredCompany(BaseModel):
+    id: str
+    name: str
+    sector: Optional[str]
+    product_type: Optional[str]
+    description: Optional[str]
+    website: Optional[str]
+    domain_tags: list[str]
+    known: bool
+    relevance_reason: Optional[str]
+    match_source: str
+
+
+class DiscoveredIndividual(BaseModel):
+    id: str
+    name: str
+    role: Optional[str]
+    email: Optional[str]
+    company_id: Optional[str]
+    company_name: Optional[str]
+    domain_tags: list[str]
+    known: bool
+    relevance_reason: Optional[str]
+    match_source: str
+
+
+class DiscoverResponse(BaseModel):
+    campaign_id: str
+    campaign_name: str
+    domain: str
+    campaign_purpose: str
+    companies: list[DiscoveredCompany]
+    individuals: list[DiscoveredIndividual]
+    total_companies: int
+    total_individuals: int
+    enrichment_queued: bool
+
+
+@router.post("/discover", response_model=DiscoverResponse)
+async def discover_targets(
+    body: DiscoverRequest,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Domain-driven auto-discovery pipeline:
+    1. Create campaign record
+    2. DB fuzzy search — find existing companies + individuals by domain
+    3. Serper web search — discover new companies not in DB
+    4. Hunter — find decision-maker contacts at matched companies
+    5. Save all new records to DB
+    6. Queue background enrichment (Hunter + OpenCorporates + Serper + Humantic)
+    7. Return full discovered list for user selection
+
+    The user then selects from the returned list and triggers bulk email generation.
+    """
+    # ── Create campaign ───────────────────────────────────────
+    campaign = OutreachCampaign(
+        name=body.campaign_name,
+        domain_target=body.domain,
+        created_by="",
+    )
+    db.add(campaign)
+    await db.flush()
+    await db.refresh(campaign)
+    await db.commit()
+
+    # ── Run discovery ─────────────────────────────────────────
+    results = await discovery_service.discover_targets(
+        domain=body.domain,
+        campaign_purpose=body.campaign_purpose,
+        db=db,
+        limit=body.limit,
+    )
+
+    # ── Queue background enrichment for new records ───────────
+    new_company_ids = results.get("new_company_ids", [])
+    new_individual_ids = results.get("new_individual_ids", [])
+    if new_company_ids or new_individual_ids:
+        background_tasks.add_task(
+            discovery_service.enrich_discovered_targets,
+            new_company_ids,
+            new_individual_ids,
+        )
+
+    return DiscoverResponse(
+        campaign_id=str(campaign.id),
+        campaign_name=campaign.name,
+        domain=body.domain,
+        campaign_purpose=body.campaign_purpose,
+        companies=[DiscoveredCompany(**c) for c in results["companies"]],
+        individuals=[DiscoveredIndividual(**i) for i in results["individuals"]],
+        total_companies=results["total_companies"],
+        total_individuals=results["total_individuals"],
+        enrichment_queued=bool(new_company_ids or new_individual_ids),
+    )
 
 
 # ════════════════════════════════════════════════════════════

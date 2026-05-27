@@ -53,6 +53,9 @@ export const api = {
   batchSerperCompanies:(ids)     => post('/research/batch/serper/companies', ids),
   batchHumantic:       (ids)     => post('/research/batch/humantic', ids),
 
+  // Discovery
+  discoverTargets: (data) => post('/targets/discover', data),
+
   // Campaigns
   getCampaigns:    ()     => get('/emails/campaigns'),
   createCampaign:  (data) => post('/emails/campaigns', data),
@@ -62,6 +65,8 @@ export const api = {
   getEmail:    (id)      => get(`/emails/${id}`),
   generateSingle:(data)  => post('/emails/generate/single', data),
   generateBatch: (data)  => post('/emails/generate', data),
+  generateCampaignTargets:(data) => post('/emails/generate/campaign-targets', data),
+
   updateEmail:   (id, d) => patch(`/emails/${id}`, d),
   approveEmail:  (id)    => post(`/emails/${id}/approve`),
   regenerateEmail:(id, fr)=> post(`/emails/${id}/regenerate${fr ? '?force_refresh_analysis=true' : ''}`),

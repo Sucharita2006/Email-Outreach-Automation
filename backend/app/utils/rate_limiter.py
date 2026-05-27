@@ -47,14 +47,22 @@ async def with_exponential_backoff(
 ):
     """
     Execute an async coroutine function with exponential backoff on failure.
-    Retries on any exception (typically 429 rate limit or 5xx errors).
-
-    Usage:
-        result = await with_exponential_backoff(lambda: call_openrouter(prompt))
+    Retries on 5xx / network errors only.
+    Does NOT retry on 4xx (client errors like 404, 429, 402) — those are
+    handled by the caller's fallback logic.
     """
+    import httpx as _httpx
     for attempt in range(max_retries):
         try:
             return await coro_fn()
+        except _httpx.HTTPStatusError as e:
+            # 4xx errors won't recover from retrying — raise immediately
+            if 400 <= e.response.status_code < 500:
+                raise
+            if attempt == max_retries - 1:
+                raise
+            delay = min(base_delay * (2 ** attempt), max_delay)
+            await asyncio.sleep(delay)
         except Exception as e:
             if attempt == max_retries - 1:
                 raise

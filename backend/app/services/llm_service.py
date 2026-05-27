@@ -12,7 +12,9 @@ Provides:
 OpenRouter docs: https://openrouter.ai/docs
 """
 
+import asyncio
 import json
+import re
 import httpx
 from pathlib import Path
 from typing import Optional
@@ -56,30 +58,52 @@ async def call_llm(
     temperature: float = 0.3,
     max_tokens: int = 1000,
     use_fallback: bool = False,
+    _chain_index: int = 0,
 ) -> dict:
     """
-    Make a single LLM call to OpenRouter.
+    Make a single LLM call to OpenRouter with automatic model chain fallback.
+
+    Fallback chain (tried in order on 404 / 429 / 402 / 503):
+      0 — Primary model       (config: OPENROUTER_PRIMARY_MODEL)
+      1 — Fallback model      (config: OPENROUTER_FALLBACK_MODEL)
+      2 — google/gemini-flash-1.5
+      3 — qwen/qwen3-next-80b-a3b-instruct:free
 
     Returns:
         {
-            "content": str,           # Raw response text
-            "model": str,             # Model actually used
-            "usage": {                # Token usage
-                "prompt_tokens": int,
-                "completion_tokens": int,
-                "total_tokens": int,
-            },
-            "status": "ok" | "error",
+            "content": str,
+            "model": str,
+            "usage": {"prompt_tokens", "completion_tokens", "total_tokens"},
+            "status": "ok" | "error" | "no_api_key",
             "error": str | None,
         }
     """
     if not settings.OPENROUTER_API_KEY:
         return {"status": "no_api_key", "content": "", "model": "", "usage": {}, "error": "OPENROUTER_API_KEY not set"}
 
-    selected_model = model or (
-        settings.OPENROUTER_FALLBACK_MODEL if use_fallback
-        else settings.OPENROUTER_PRIMARY_MODEL
-    )
+    # ── Model chain ───────────────────────────────────────────
+    # Each provider has independent rate limits. We randomize the first choice
+    # across different providers so a burst of 30 concurrent requests spreads out.
+    import random
+    
+    _FREE_MODELS = [
+        settings.OPENROUTER_PRIMARY_MODEL,          # google/gemma-4-31b-it:free
+        settings.OPENROUTER_FALLBACK_MODEL,         # google/gemma-4-26b-a4b-it:free
+        "nvidia/nemotron-3-super-120b-a12b:free",   # NVIDIA pool
+        "qwen/qwen3-next-80b-a3b-instruct:free",    # Alibaba/Venice pool
+        "minimax/minimax-m2.5:free",                # MiniMax pool
+        "liquid/lfm-2.5-1.2b-instruct:free",        # Liquid pool
+        "nvidia/nemotron-nano-9b-v2:free",          # NVIDIA pool (smaller, faster)
+    ]
+
+    # If first attempt and no specific model requested, pick a random provider
+    if _chain_index == 0 and not model:
+        selected_model = random.choice(_FREE_MODELS)
+        # Put the randomly selected model at the start of the chain
+        _MODEL_CHAIN = [selected_model] + [m for m in _FREE_MODELS if m != selected_model]
+    else:
+        _MODEL_CHAIN = _FREE_MODELS
+        selected_model = model or _MODEL_CHAIN[min(_chain_index, len(_MODEL_CHAIN) - 1)]
 
     messages = []
     if system_prompt:
@@ -95,7 +119,7 @@ async def call_llm(
 
     async def _do_call():
         async with _llm_limiter:
-            async with httpx.AsyncClient(timeout=60.0) as client:
+            async with httpx.AsyncClient(timeout=30.0) as client:
                 resp = await client.post(
                     f"{settings.OPENROUTER_BASE_URL}/chat/completions",
                     json=payload,
@@ -120,21 +144,26 @@ async def call_llm(
     try:
         return await with_exponential_backoff(_do_call, max_retries=3, base_delay=2.0)
     except httpx.HTTPStatusError as e:
-        # If primary model fails with rate limit / payment, try fallback
-        if not use_fallback and e.response.status_code in (429, 503, 402):
+        status_code = e.response.status_code
+        next_index = _chain_index + 1
+
+        # Advance to next model in chain on recoverable errors
+        if status_code in (404, 429, 402, 503) and next_index < len(_MODEL_CHAIN):
+            if status_code == 429:
+                await asyncio.sleep(5)
             return await call_llm(
                 prompt=prompt,
                 system_prompt=system_prompt,
                 temperature=temperature,
                 max_tokens=max_tokens,
-                use_fallback=True,
+                _chain_index=next_index,
             )
         return {
             "status": "error",
             "content": "",
             "model": selected_model,
             "usage": {},
-            "error": f"OpenRouter {e.response.status_code}: {e.response.text[:300]}",
+            "error": f"OpenRouter {status_code}: {e.response.text[:300]}",
         }
     except Exception as e:
         return {
@@ -153,10 +182,12 @@ async def call_llm_json(
     temperature: float = 0.2,
     max_tokens: int = 800,
     required_keys: list[str] = None,
+    max_retries: int = 3,
 ) -> dict:
     """
     Make an LLM call expecting a JSON response.
     Strips markdown code fences and parses the JSON.
+    Automatically retries on invalid JSON or missing keys, advancing the model chain.
 
     Returns:
         {
@@ -169,50 +200,77 @@ async def call_llm_json(
             "missing_keys": list,
         }
     """
-    result = await call_llm(
-        prompt=prompt,
-        model=model,
-        system_prompt=system_prompt,
-        temperature=temperature,
-        max_tokens=max_tokens,
-    )
+    last_response = None
+    
+    for attempt in range(max_retries):
+        result = await call_llm(
+            prompt=prompt,
+            model=model,
+            system_prompt=system_prompt,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            _chain_index=attempt,
+        )
 
-    if result["status"] != "ok":
-        return {**result, "data": None, "raw": result.get("content", ""), "missing_keys": []}
+        if result["status"] != "ok":
+            last_response = {**result, "data": None, "raw": result.get("content", ""), "missing_keys": []}
+            continue
 
-    raw = result["content"]
+        raw = result["content"]
 
-    # Strip markdown code fences: ```json ... ``` or ``` ... ```
-    cleaned = raw.strip()
-    if cleaned.startswith("```"):
-        lines = cleaned.split("\n")
-        inner = lines[1:] if lines[0].startswith("```") else lines
-        if inner and inner[-1].strip() == "```":
-            inner = inner[:-1]
-        cleaned = "\n".join(inner).strip()
+        # Strip markdown code fences: ```json ... ``` or ``` ... ```
+        cleaned = raw.strip()
+        if cleaned.startswith("```"):
+            lines = cleaned.split("\n")
+            inner = lines[1:] if lines[0].startswith("```") else lines
+            if inner and inner[-1].strip() == "```":
+                inner = inner[:-1]
+            cleaned = "\n".join(inner).strip()
 
-    try:
-        parsed = json.loads(cleaned)
-    except json.JSONDecodeError as e:
+        try:
+            parsed = json.loads(cleaned)
+        except json.JSONDecodeError:
+            # Fallback: extract substring between first { and last } or first [ and last ]
+            try:
+                match = re.search(r'(\{.*\}|\[.*\])', raw, re.DOTALL)
+                if match:
+                    parsed = json.loads(match.group(1))
+                else:
+                    raise json.JSONDecodeError("No JSON structure found", raw, 0)
+            except json.JSONDecodeError as e:
+                last_response = {
+                    "status": "invalid_json",
+                    "data": None,
+                    "raw": raw,
+                    "model": result["model"],
+                    "usage": result["usage"],
+                    "error": f"JSON parse error: {e}",
+                    "missing_keys": [],
+                }
+                continue
+
+        # Validate required keys
+        missing = [k for k in (required_keys or []) if k not in parsed]
+        if missing:
+            last_response = {
+                "status": "missing_keys",
+                "data": parsed,
+                "raw": raw,
+                "model": result["model"],
+                "usage": result["usage"],
+                "error": f"Missing keys: {missing}",
+                "missing_keys": missing,
+            }
+            continue
+
         return {
-            "status": "invalid_json",
-            "data": None,
+            "status": "ok",
+            "data": parsed,
             "raw": raw,
             "model": result["model"],
             "usage": result["usage"],
-            "error": f"JSON parse error: {e}",
+            "error": None,
             "missing_keys": [],
         }
 
-    # Validate required keys
-    missing = [k for k in (required_keys or []) if k not in parsed]
-
-    return {
-        "status": "ok" if not missing else "missing_keys",
-        "data": parsed,
-        "raw": raw,
-        "model": result["model"],
-        "usage": result["usage"],
-        "error": None if not missing else f"Missing keys: {missing}",
-        "missing_keys": missing,
-    }
+    return last_response

@@ -1,49 +1,65 @@
-You are an expert outreach writer for an animal advocacy nonprofit.
-Write a cold outreach email using the structured research below.
-Do NOT add generic filler. Every single sentence must be specific and earned.
-Do NOT use phrases like "I hope this email finds you well" or "I wanted to reach out".
+You are writing a cold outreach email on behalf of {{ nonprofit_name }}.
+Output a complete, ready-to-send email. No placeholders. No brackets. No structural labels or section headings.
+
+=== SENDER ===
+Organization: {{ nonprofit_name }}
+Mission: {{ nonprofit_mission }}
+From: {{ sender_name }}, {{ sender_role }}
 
 === RECIPIENT ===
 Name: {{ target.name }}
 Role: {{ target.role }}
 Company: {{ target.company }}
 
-=== OUR ORGANIZATION ===
-{{ nonprofit_name }} — {{ nonprofit_mission }}
-This email is from: {{ sender_name }}, {{ sender_role }}
+=== INTELLIGENCE ===
+Individual hook: {{ individual_analysis.key_hook }}
+Motivation: {{ individual_analysis.motivation_trigger }}
+Tone: {{ individual_analysis.tone_instruction }}
+Avoid: {{ individual_analysis.avoid }}
 
-=== INDIVIDUAL ANALYSIS ===
-- Key hook: {{ individual_analysis.key_hook }}
-- Tone instruction: {{ individual_analysis.tone_instruction }}
-- Motivation trigger: {{ individual_analysis.motivation_trigger }}
-- Avoid: {{ individual_analysis.avoid }}
-
-=== COMPANY ANALYSIS ===
-- Mission fit: {{ company_analysis.mission_fit }}
-- News hook to reference: {{ company_analysis.news_hook }}
-- Collaboration angle: {{ company_analysis.collaboration_angle }}
-- Credibility signal: {{ company_analysis.credibility_signal }}
-
-=== PREVIOUS CONTACT HISTORY ===
-{% if previous_contact %}
-We previously contacted {{ target.name }} on {{ previous_contact.date }} about "{{ previous_contact.domain }}".
-They {{ "replied — their response snippet: '" + previous_contact.reply_snippet + "'" if previous_contact.replied else "did not reply to that email" }}.
-Reference this history naturally in the email. Do not ignore it.
-{% else %}
-This is our first contact with this person. Do not reference any prior history.
+Company mission fit: {{ company_analysis.mission_fit }}
+Collaboration angle: {{ company_analysis.collaboration_angle }}
+Credibility signal: {{ company_analysis.credibility_signal }}
+{% if company_analysis.news_hook and company_analysis.news_hook != "No recent news hook available" %}
+Recent news: {{ company_analysis.news_hook }}
 {% endif %}
 
-=== EMAIL REQUIREMENTS ===
-1. Subject line: compelling, specific, under 60 characters. Must reference the news_hook or key_hook by name — not generic.
-2. Opening (1–2 sentences): Reference the news_hook or key_hook DIRECTLY by name. No generic openers.
-3. Middle (2–3 sentences): Use mission_fit + collaboration_angle. Be concrete about what we do and how we could work together.
-4. Ask: ONE low-friction call to action only (e.g., "Would you be open to a 20-minute call next week?").
-5. Closing: Professional sign-off from {{ sender_name }}, {{ sender_role }} at {{ nonprofit_name }}.
-6. Total word count: UNDER 200 words.
-7. Apply tone_instruction strictly throughout. Avoid anything listed in the avoid field.
-8. Never mention DISC types, personality profiles, or that you used any AI tool.
+{% if previous_contact %}
+Prior contact: We emailed {{ target.name }} on {{ previous_contact.date }}. They {{ "replied" if previous_contact.replied else "did not reply" }}. Reference this naturally.
+{% endif %}
 
-Output in this exact format — nothing before or after:
-Subject: [subject line here]
-Body:
-[full email body here]
+=== EMAIL STRUCTURE ===
+Write the email in this exact order — no labels, no headings:
+
+1. Greeting line: "Dear [first name],"
+
+2. Opening (1–2 sentences): Briefly introduce {{ nonprofit_name }} — what it is, what it does, and how it operates. Do NOT start with "I", "We wanted to", or "I hope this email finds you well".
+
+3. Bridge (1–2 sentences): Reference {{ target.company }}'s work in the domain. Use the company mission fit and collaboration angle. If a recent news hook exists, open this section with it by name.
+
+4. Ask (1 sentence): One clear, specific, low-friction call to action — a 20-minute call, a specific question, or a shared resource. Do not list multiple asks.
+
+5. Closing (1 sentence): Brief, warm, professional. Not "Looking forward to hearing from you."
+
+6. Sign-off:
+Warm regards,
+{{ sender_name }}
+{{ sender_role }}, {{ nonprofit_name }}
+
+=== RULES ===
+- Total word count: 120–180 words.
+- Apply the tone instruction throughout. Strictly avoid anything listed in the avoid field.
+- Never mention DISC profiles, AI tools, personality assessments, or research methods.
+- Never use section headings like "Opening:", "Bridge:", "Closing:" in the output.
+- Never add word counts, notes, or any text after the sign-off.
+
+Output format — exactly this, nothing before or after:
+Subject: [subject line under 60 characters, specific to recipient and campaign]
+
+Dear [first name],
+
+[email body]
+
+Warm regards,
+{{ sender_name }}
+{{ sender_role }}, {{ nonprofit_name }}

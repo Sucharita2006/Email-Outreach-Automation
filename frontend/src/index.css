@@ -347,7 +347,27 @@ code, pre { font-family: 'JetBrains Mono', monospace; }
 }
 
 .form-textarea { resize: vertical; min-height: 120px; line-height: 1.6; }
-.form-select { cursor: pointer; appearance: none; }
+.form-select {
+  cursor: pointer;
+  appearance: none;
+  background-color: var(--bg-secondary);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2394a3b8' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  padding-right: 36px;
+}
+
+.form-select option {
+  background-color: #0d1525;
+  color: #f0f6ff;
+  padding: 8px 12px;
+}
+
+.form-select option:hover,
+.form-select option:checked {
+  background-color: rgba(16, 185, 129, 0.2);
+  color: #f0f6ff;
+}
 
 /* ── Badges / Status ── */
 .badge {
