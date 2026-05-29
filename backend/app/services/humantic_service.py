@@ -311,7 +311,7 @@ async def enrich_individual(
 
     # ── Parse + store ─────────────────────────────────────────
     personality = _extract_personality(api_result)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
 
     individual.humantic_disc = personality["disc_type"]
     individual.humantic_big5 = personality["big5"]

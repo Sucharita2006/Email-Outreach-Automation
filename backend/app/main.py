@@ -9,14 +9,20 @@ logging.basicConfig(level=logging.INFO)
 logging.getLogger("discovery").setLevel(logging.INFO)
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 
 from app.database.session import init_db
 from app.routers import targets, research, emails, campaigns, tracking
 from app.config import settings
 
 logger = logging.getLogger(__name__)
+
+# Initialize rate limiter with global default limits (60 requests per minute)
+limiter = Limiter(key_func=get_remote_address, default_limits=["60/minute"])
 
 
 # ════════════════════════════════════════════════════════════
@@ -116,8 +122,9 @@ app = FastAPI(
     ),
     version="1.0.0",
     lifespan=lifespan,
-    docs_url="/docs",
-    redoc_url="/redoc",
+    docs_url="/docs" if settings.APP_ENV != "production" else None,
+    redoc_url="/redoc" if settings.APP_ENV != "production" else None,
+    openapi_url="/openapi.json" if settings.APP_ENV != "production" else None,
     contact={
         "name": "OutreachAI",
         "url": "https://github.com/Sucharita2006/Email-Outreach-Automation",
@@ -133,13 +140,35 @@ app.add_middleware(
         "http://localhost:3000",    # Alternative frontend port
         "http://127.0.0.1:5173",
         "http://127.0.0.1:3000",
+        settings.FRONTEND_URL,      # Production Frontend URL
     ],
+    allow_origin_regex=r"https://.*\.vercel\.app",  # Allow all Vercel preview deployments
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# ── Rate Limiting Middleware ──────────────────────────────────
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# ── API Key Auth Middleware ───────────────────────────────────
+from fastapi.responses import JSONResponse
+
+@app.middleware("http")
+async def api_key_validator(request: Request, call_next):
+    if settings.API_KEY and settings.APP_ENV == "production":
+        path = request.url.path
+        # Allow OPTIONS for CORS preflight, auth callbacks, health check, and root
+        if request.method != "OPTIONS" and not (path.startswith("/auth/") or path in ["/health", "/"]):
+            api_key = request.headers.get("X-API-Key")
+            if not api_key or api_key != settings.API_KEY:
+                return JSONResponse(status_code=401, content={"detail": "Unauthorized: Invalid or missing X-API-Key"})
+    
+    return await call_next(request)
+
 # ── Routers ───────────────────────────────────────────────────
+app.include_router(tracking.auth_router, tags=["Auth"])
 app.include_router(campaigns.router, prefix="/campaigns", tags=["Campaigns"])
 app.include_router(targets.router,   prefix="/targets",   tags=["Targets"])
 app.include_router(research.router,  prefix="/research",  tags=["Research"])

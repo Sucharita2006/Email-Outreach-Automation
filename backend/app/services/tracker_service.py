@@ -45,7 +45,7 @@ async def mark_replied(
     Returns:
         Summary dict with updated status.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
 
     # ── Update email status ───────────────────────────────────
     email.status = EmailStatus.REPLIED
@@ -55,7 +55,7 @@ async def mark_replied(
     reply_record = ReplyHistory(
         email_id=email.id,
         reply_received_at=now,
-        reply_snippet=reply_snippet[:500] if reply_snippet else "",
+        reply_snippet=reply_snippet or "",
         domain_context=_get_campaign_domain(email, db),
         sentiment=sentiment,
         notes=None,
@@ -89,7 +89,7 @@ async def mark_ignored(
     Returns:
         Summary dict with follow-up due date if scheduled.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     email.status = EmailStatus.IGNORED
 
     follow_up_due = None
@@ -119,7 +119,7 @@ async def mark_follow_up_sent(
     Record that a follow-up email was sent for this original email.
     Updates follow_up_count and schedules a second follow-up if applicable.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     email.status = EmailStatus.FOLLOW_UP_SENT
     email.follow_up_count = (email.follow_up_count or 0) + 1
 
@@ -148,7 +148,7 @@ async def get_due_follow_ups(db: AsyncSession) -> list[OutreachEmail]:
       - follow_up_due_at <= now
       - follow_up_count < 2 (max 2 follow-ups)
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     stmt = (
         select(OutreachEmail)
         .where(
@@ -210,19 +210,22 @@ async def tracking_dashboard(
         if campaign_id:
             stmt = stmt.where(OutreachEmail.campaign_id == campaign_id)
         if status_filter:
-            stmt = stmt.where(OutreachEmail.status == status_filter)
+            if isinstance(status_filter, list):
+                stmt = stmt.where(OutreachEmail.status.in_(status_filter))
+            else:
+                stmt = stmt.where(OutreachEmail.status == status_filter)
         return (await db.execute(stmt)).scalar_one()
 
     total = await _count()
     drafted = await _count(EmailStatus.DRAFTED)
-    sent = await _count(EmailStatus.SENT)
+    sent = await _count([EmailStatus.SENT, EmailStatus.REPLIED, EmailStatus.IGNORED, EmailStatus.FOLLOW_UP_SENT])
     replied = await _count(EmailStatus.REPLIED)
     ignored = await _count(EmailStatus.IGNORED)
     follow_up_sent = await _count(EmailStatus.FOLLOW_UP_SENT)
     archived = await _count(EmailStatus.ARCHIVED)
 
     # Follow-ups due today
-    now = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     due_stmt = select(func.count()).select_from(OutreachEmail).where(
         OutreachEmail.status.in_([EmailStatus.IGNORED, EmailStatus.SENT]),
         OutreachEmail.follow_up_due_at <= now,

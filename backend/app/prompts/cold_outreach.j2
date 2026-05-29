@@ -9,9 +9,14 @@ From: {{ sender_name }}, {{ sender_role }}
 === RECIPIENT ===
 Name: {{ target.name }}
 Role: {{ target.role }}
+{% if target.company %}
 Company: {{ target.company }}
+{% endif %}
 
 === INTELLIGENCE ===
+{% if campaign_purpose %}
+Campaign Purpose: {{ campaign_purpose }}
+{% endif %}
 Individual hook: {{ individual_analysis.key_hook }}
 Motivation: {{ individual_analysis.motivation_trigger }}
 Tone: {{ individual_analysis.tone_instruction }}
@@ -48,9 +53,9 @@ Write the email in this exact order — no labels, no headings:
 
 2. Opening (1–2 sentences): Briefly introduce {{ nonprofit_name }} — what it is, what it does, and how it operates. Do NOT start with "I", "We wanted to", or "I hope this email finds you well".
 
-3. Bridge (1–2 sentences): Reference {{ target.company }}'s work in the domain. Use the company mission fit and collaboration angle. If a recent news hook exists, open this section with it by name.
+3. Bridge (1–2 sentences): {% if target.company %}Reference {{ target.company }}'s work in the domain.{% else %}Reference their independent initiatives or advocacy in the domain.{% endif %} Use the company mission fit and collaboration angle. If a recent news hook exists, open this section with it by name.
 
-4. Ask (1 sentence): One clear, specific, low-friction call to action — a 20-minute call, a specific question, or a shared resource. Do not list multiple asks.
+4. The Ask / Context (1-2 sentences): {% if campaign_purpose %}Use the following campaign context to naturally shape the email's purpose and ask: "{{ campaign_purpose }}". Connect it smoothly to the bridge.{% else %}One clear, specific, low-friction call to action — a 20-minute call, a specific question, or a shared resource. Do not list multiple asks.{% endif %}
 
 5. Closing (1 sentence): Brief, warm, professional. Not "Looking forward to hearing from you."
 

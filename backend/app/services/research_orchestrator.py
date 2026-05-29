@@ -116,7 +116,7 @@ async def run_individual_analysis(
         }
 
     # ── Cache result ──────────────────────────────────────────
-    now = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     individual.individual_analysis_cache = result["data"]
     individual.individual_analysis_cached_at = now
     await db.flush()
@@ -221,7 +221,7 @@ async def run_company_analysis(
         }
 
     # ── Cache result ──────────────────────────────────────────
-    now = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     company.company_analysis_cache = result["data"]
     company.company_analysis_cached_at = now
     await db.flush()
@@ -255,6 +255,7 @@ async def run_email_draft(
     company: Company,
     individual_analysis: dict,
     company_analysis: dict,
+    campaign_purpose: str,
     previous_contact: Optional[dict] = None,
 ) -> dict:
     """
@@ -265,10 +266,15 @@ async def run_email_draft(
 
     Returns: {status, subject, body, raw, model, usage}
     """
+    # Do not pass the dummy company name to the LLM
+    company_name = company.name
+    if company_name and company_name.endswith(" (Individual)"):
+        company_name = None
+
     target_ctx = {
         "name": individual.name,
         "role": individual.role or "Professional",
-        "company": company.name,
+        "company": company_name,
     }
 
     # ── Render prompt ─────────────────────────────────────────
@@ -281,6 +287,7 @@ async def run_email_draft(
         sender_role=settings.NONPROFIT_SENDER_ROLE,
         individual_analysis=individual_analysis,
         company_analysis=company_analysis,
+        campaign_purpose=campaign_purpose,
         previous_contact=previous_contact,
     )
 
@@ -418,6 +425,7 @@ async def generate_email_for_target(
     individual: Individual,
     company: Company,
     campaign_id: str,
+    campaign_purpose: str,
     db: AsyncSession,
     force_refresh_analysis: bool = False,
     previous_contact: Optional[dict] = None,
@@ -446,6 +454,7 @@ async def generate_email_for_target(
         company=company,
         individual_analysis=individual_analysis,
         company_analysis=company_analysis,
+        campaign_purpose=campaign_purpose,
         previous_contact=previous_contact,
     )
 
@@ -468,7 +477,7 @@ async def generate_email_for_target(
         subject=draft_result["subject"],
         body=draft_result["body"],
         status=EmailStatus.DRAFTED,
-        drafted_at=datetime.now(timezone.utc),
+        drafted_at=datetime.now(timezone.utc).replace(tzinfo=None),
         llm_model_used=draft_result.get("model"),
         individual_analysis_snapshot=individual_analysis,
         company_analysis_snapshot=company_analysis,
@@ -520,6 +529,13 @@ async def batch_generate_emails(
     from app.database.session import AsyncSessionLocal
 
     results = []
+    
+    # Get campaign purpose first
+    campaign_purpose = ""
+    result = await db.execute(select(OutreachCampaign).where(OutreachCampaign.id == campaign_id))
+    campaign = result.scalar_one_or_none()
+    if campaign:
+        campaign_purpose = campaign.purpose or ""
 
     for pair in target_pairs:
         ind_id = pair.get("individual_id")
@@ -592,6 +608,7 @@ async def batch_generate_emails(
                     individual=individual,
                     company=company,
                     campaign_id=campaign_id,
+                    campaign_purpose=campaign_purpose,
                     db=task_db,
                     force_refresh_analysis=force_refresh_analysis,
                 )

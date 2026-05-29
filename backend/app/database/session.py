@@ -12,12 +12,16 @@ from app.database.models import Base
 
 
 # ── Engine ────────────────────────────────────────────────────
+db_url = settings.DATABASE_URL
+if db_url.startswith("postgres://") or db_url.startswith("postgresql://"):
+    db_url = db_url.replace("postgres://", "postgresql+asyncpg://").replace("postgresql://", "postgresql+asyncpg://")
+
 # For SQLite: use StaticPool ONLY for in-memory databases
-is_sqlite = "sqlite" in settings.DATABASE_URL
-is_memory = ":memory:" in settings.DATABASE_URL
+is_sqlite = "sqlite" in db_url
+is_memory = ":memory:" in db_url
 
 engine = create_async_engine(
-    settings.DATABASE_URL,
+    db_url,
     echo=(settings.APP_ENV == "development"),  # SQL logging in dev only
     connect_args={
         "check_same_thread": False,

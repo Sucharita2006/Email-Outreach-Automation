@@ -36,7 +36,7 @@ async def send_email_draft(
             "message": f"Email is '{email.status}', not 'drafted'. Only drafted emails can be marked sent.",
         }
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     email.status = EmailStatus.SENT
     email.sent_at = now
     await db.flush()

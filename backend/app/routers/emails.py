@@ -44,6 +44,7 @@ router = APIRouter()
 async def create_campaign(
     name: str = Body(...),
     domain_target: str = Body(...),
+    purpose: str = Body(default=""),
     created_by: str = Body(default=""),
     db: AsyncSession = Depends(get_db),
 ):
@@ -51,6 +52,7 @@ async def create_campaign(
     campaign = OutreachCampaign(
         name=name,
         domain_target=domain_target,
+        purpose=purpose,
         created_by=created_by,
     )
     db.add(campaign)
@@ -61,6 +63,7 @@ async def create_campaign(
         "id": campaign.id,
         "name": campaign.name,
         "domain_target": campaign.domain_target,
+        "purpose": campaign.purpose,
         "status": campaign.status,
         "created_at": campaign.created_at.isoformat(),
     }
@@ -109,6 +112,7 @@ class EmailUpdate(BaseModel):
     subject: Optional[str] = None
     body: Optional[str] = None
     notes: Optional[str] = None
+    recipient_email: Optional[str] = None
 
 
 class EmailRead(BaseModel):
@@ -170,6 +174,7 @@ async def generate_single_email(
         individual=individual,
         company=company,
         campaign_id=req.campaign_id,
+        campaign_purpose=campaign.purpose or "",
         db=db,
         force_refresh_analysis=req.force_refresh_analysis,
     )
@@ -388,7 +393,7 @@ async def approve_email(
         )
 
     email.status = EmailStatus.SENT
-    email.sent_at = datetime.now(timezone.utc)
+    email.sent_at = datetime.now(timezone.utc).replace(tzinfo=None)
 
     await db.flush()
     await db.refresh(email)
@@ -450,7 +455,7 @@ async def regenerate_email(
 
     # Archive the old draft
     old_email.status = EmailStatus.ARCHIVED
-    old_email.archived_at = datetime.now(timezone.utc)
+    old_email.archived_at = datetime.now(timezone.utc).replace(tzinfo=None)
     await db.flush()
 
     # Build previous context with user feedback
@@ -462,11 +467,15 @@ async def regenerate_email(
             "user_feedback": body.user_feedback,
         }
 
+    # Load campaign to get purpose
+    campaign = await _get_campaign_or_404(old_email.campaign_id, db)
+
     # Generate new draft
     result = await research_orchestrator.generate_email_for_target(
         individual=individual,
         company=company,
         campaign_id=old_email.campaign_id,
+        campaign_purpose=campaign.purpose or "",
         db=db,
         force_refresh_analysis=body.force_refresh_analysis,
         previous_contact=previous_context,

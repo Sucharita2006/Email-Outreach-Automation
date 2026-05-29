@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     APP_HOST: str = "0.0.0.0"
     APP_PORT: int = 8000
     SECRET_KEY: str = "change_this_to_a_random_secret_key"
+    API_KEY: str = "" # Set this in production to secure endpoints
+    FRONTEND_URL: str = "http://localhost:5173"
 
     # ── Database ──────────────────────────────────────────────
     DATABASE_URL: str = "sqlite+aiosqlite:///./outreach.db"

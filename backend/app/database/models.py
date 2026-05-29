@@ -58,6 +58,20 @@ class DISCType(str, enum.Enum):
 
 # ── Models ────────────────────────────────────────────────────
 
+class SystemSetting(Base):
+    """
+    Stores global configuration and secrets like Gmail OAuth tokens.
+    """
+    __tablename__ = "system_settings"
+
+    key = Column(String(100), primary_key=True)
+    value = Column(JSON, nullable=False)
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+
+    def __repr__(self) -> str:
+        return f"<SystemSetting key={self.key}>"
+
+
 class Company(Base):
     """
     Represents a company or organization that is a potential outreach target.
@@ -192,6 +206,7 @@ class OutreachCampaign(Base):
     id = Column(String(36), primary_key=True, default=new_uuid)
     name = Column(String(255))                         # Optional human-readable name
     domain_target = Column(String(100), nullable=False, index=True)  # e.g., "veganism"
+    purpose = Column(Text, default="")                  # Campaign purpose entered by user
     status = Column(Enum(CampaignStatus), default=CampaignStatus.DRAFT, nullable=False)
     created_by = Column(String(255))                   # User or org name
     total_targets = Column(Integer, default=0)

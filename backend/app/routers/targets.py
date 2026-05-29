@@ -66,6 +66,7 @@ class CompanyRead(BaseModel):
     size: Optional[str]
     sector: Optional[str]
     product_type: Optional[str]
+    campaign_ids: list[str] = []
     known: bool
     last_contacted_at: Optional[datetime]
     company_status: Optional[str]
@@ -103,9 +104,19 @@ class IndividualUpdate(BaseModel):
     known: Optional[bool] = None
 
 
+class CompanyMinimalRead(BaseModel):
+    id: str
+    name: str
+    sector: Optional[str]
+    industry: Optional[str]
+    
+    model_config = {"from_attributes": True}
+
+
 class IndividualRead(BaseModel):
     id: str
     company_id: Optional[str]
+    company: Optional[CompanyMinimalRead] = None
     name: str
     first_name: Optional[str]
     last_name: Optional[str]
@@ -115,6 +126,7 @@ class IndividualRead(BaseModel):
     email_verified: Optional[bool]
     linkedin_url: Optional[str]
     domain_tags: list[str]
+    campaign_ids: list[str] = []
     known: bool
     last_contacted_at: Optional[datetime]
     humantic_disc: Optional[str]
@@ -208,6 +220,7 @@ async def discover_targets(
     campaign = OutreachCampaign(
         name=body.campaign_name,
         domain_target=body.domain,
+        purpose=body.campaign_purpose,
         created_by="",
     )
     db.add(campaign)
@@ -216,13 +229,17 @@ async def discover_targets(
     await db.commit()
 
     # ── Run discovery (all steps synchronous) ─────────────────
-    results = await discovery_service.discover_targets(
-        domain=body.domain,
-        campaign_purpose=body.campaign_purpose,
-        db=db,
-        limit=body.limit,
-        campaign_id=str(campaign.id)
-    )
+    try:
+        results = await discovery_service.discover_targets(
+            domain=body.domain,
+            campaign_purpose=body.campaign_purpose,
+            db=db,
+            limit=body.limit,
+            campaign_id=str(campaign.id)
+        )
+    except Exception as e:
+        import traceback
+        raise HTTPException(status_code=400, detail=traceback.format_exc())
 
     return DiscoverResponse(
         campaign_id=str(campaign.id),
@@ -440,7 +457,7 @@ async def list_individuals(
     db: AsyncSession = Depends(get_db),
 ):
     """List individuals with optional filters."""
-    stmt = select(Individual)
+    stmt = select(Individual).options(selectinload(Individual.company))
 
     if company_id:
         stmt = stmt.where(Individual.company_id == company_id)

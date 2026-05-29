@@ -239,7 +239,7 @@ async def enrich_company_contacts(
     # ── Call Hunter ───────────────────────────────────────────
     result = await domain_search(domain, limit=limit)
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     company.hunter_domain_cache = result
     company.hunter_cached_at = now
 

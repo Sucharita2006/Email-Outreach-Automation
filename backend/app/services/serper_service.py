@@ -82,7 +82,7 @@ async def news_search(query: str, num: int = 5) -> dict:
                         }
                         for a in articles
                     ],
-                    "fetched_at": datetime.now(timezone.utc).isoformat(),
+                    "fetched_at": datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
                 }
             except httpx.HTTPStatusError as e:
                 return {
@@ -127,7 +127,7 @@ async def web_search(query: str, num: int = 5) -> dict:
                     ],
                     "knowledge_graph": data.get("knowledgeGraph"),
                     "answer_box": data.get("answerBox"),
-                    "fetched_at": datetime.now(timezone.utc).isoformat(),
+                    "fetched_at": datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
                 }
             except httpx.HTTPStatusError as e:
                 return {
@@ -251,7 +251,7 @@ async def enrich_company(
     web_result = await web_search(queries["web"], num=5)
 
     # ── Process + store ───────────────────────────────────────
-    now = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     intelligence = _extract_company_intelligence(web_result, news_result)
     news_hook = _get_recent_news_hook(news_result)
 
@@ -369,7 +369,7 @@ async def enrich_individual(
     talks_result = await web_search(queries["talks"], num=3)
 
     # ── Process + store ───────────────────────────────────────
-    now = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     signals = _extract_individual_signals({
         "mentions": mentions_result,
         "talks": talks_result,

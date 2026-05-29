@@ -61,7 +61,7 @@ async def generate_follow_up(
     if sent_at:
         if sent_at.tzinfo is None:
             sent_at = sent_at.replace(tzinfo=timezone.utc)
-        days_elapsed = (datetime.now(timezone.utc) - sent_at).days
+        days_elapsed = (datetime.now(timezone.utc).replace(tzinfo=None) - sent_at).days
 
     # ── Render follow-up prompt ───────────────────────────────
     target_ctx = {
@@ -108,7 +108,7 @@ async def generate_follow_up(
         subject = f"Re: {original_email.subject or 'Following up'}"
 
     # ── Save new OutreachEmail ────────────────────────────────
-    now = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     follow_up_email = OutreachEmail(
         campaign_id=original_email.campaign_id,
         target_type=original_email.target_type,
@@ -224,7 +224,7 @@ async def schedule_follow_up(
     Manually schedule a follow-up for an email at a specific number of days from now.
     Defaults to FOLLOWUP_1_DAYS if not specified.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     delay_days = days or settings.FOLLOWUP_1_DAYS
     follow_up_due = now + timedelta(days=delay_days)
 

@@ -27,7 +27,7 @@ var/
 sdist/
 develop-eggs/
 .installed.cfg
-lib/
+/lib/
 lib64/
 pip-wheel-metadata/
 

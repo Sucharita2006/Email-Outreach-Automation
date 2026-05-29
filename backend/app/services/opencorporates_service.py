@@ -197,7 +197,7 @@ async def enrich_company(
     best = results[0]
 
     # ── Update Company model ──────────────────────────────────
-    now = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
 
     # Only overwrite fields that are currently empty (don't clobber manual data)
     if not company.opencorporates_id:

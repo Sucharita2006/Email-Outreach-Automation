@@ -1,6 +1,8 @@
 import { useState, Fragment } from 'react';
 import api from '../api';
 import { useToast, StatusBadge, Spinner, EmptyState, Modal, CopyButton, ConfirmButton, useApi, fmtDate, fmtRelative, truncate } from '../components';
+import { Building, Users, Mail, MessageSquare, AlertCircle, Briefcase, Rocket, FolderOpen } from 'lucide-react';
+import { ScrollArea } from '@/components/ui/scroll-area';
 
 // ════════════════════════════════════════════════════════════
 //  Email Generate Page — Domain-Driven Wizard
@@ -258,17 +260,17 @@ export function Generate() {
 
   // ── Render ────────────────────────────────────────────────
   return (
-    <div>
-      <div className="page-header">
+    <div className="flex-1 flex flex-col h-full overflow-hidden">
+      <div className="page-header shrink-0">
         <div>
-          <h1 className="page-title">✉️ Generate Emails</h1>
+          <h1 className="page-title"><Rocket className="inline-block w-6 h-6 mr-1" style={{ WebkitTextFillColor: 'initial', color: '#818cf8', verticalAlign: '-3px' }} /> Start Campaign</h1>
           <p className="page-subtitle">Enter your domain → discover targets → generate personalized emails</p>
         </div>
         {step > 1 && <button className="btn btn-ghost btn-sm" onClick={reset}>↩ Start Over</button>}
       </div>
 
       {/* Step indicators */}
-      <div className="pipeline" style={{ marginBottom: 28 }}>
+      <div className="pipeline shrink-0" style={{ marginBottom: 28 }}>
         {['Campaign Setup', 'Select Targets', 'Generating', 'Review'].map((s, i) => (
           <Fragment key={s}>
             <div className={`pipeline-step ${step === i+1 ? 'active' : step > i+1 ? 'done' : ''}`}>
@@ -279,10 +281,13 @@ export function Generate() {
         ))}
       </div>
 
-      {/* ── Step 1: Campaign Setup ── */}
-      {step === 1 && (
-        <div className="card" style={{ maxWidth: 580 }}>
-          <h3 className="card-title" style={{ marginBottom: 20 }}>Campaign Setup</h3>
+      <div className="flex-1 w-full pr-4 flex flex-col overflow-hidden">
+        {/* ── Step 1: Campaign Setup ── */}
+        {step === 1 && (
+        <ScrollArea className="flex-1 w-full">
+        <div className="flex justify-center items-start pt-4 w-full h-full pb-10">
+          <div className="card w-full" style={{ maxWidth: 680 }}>
+            <h3 className="card-title" style={{ marginBottom: 20 }}>Campaign Setup</h3>
 
           <div className="form-group">
             <label className="form-label">Campaign Name</label>
@@ -322,16 +327,26 @@ export function Generate() {
           </button>
 
           {discovering && (
-            <div style={{ width: '100%', height: 6, background: 'var(--bg-glass)', marginTop: 16, borderRadius: 3, overflow: 'hidden' }}>
-              <div style={{ width: `${discoverProgress}%`, height: '100%', background: 'var(--accent-1)', transition: 'width 0.5s ease-out' }} />
+            <div style={{ marginTop: 24, display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div style={{ display: 'flex', gap: 12, alignItems: 'center', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', padding: '12px 16px', borderRadius: 'var(--radius-md)' }}>
+                <div style={{ fontSize: '1.2rem' }}>⏳</div>
+                <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                  <span style={{ color: 'var(--text)', fontWeight: 600 }}>Please be patient.</span> This process can take up to 3-4 minutes to complete. Hold tight while we fetch all the contacts for you!
+                </div>
+              </div>
+              <div style={{ width: '100%', height: 6, background: 'var(--bg-glass)', borderRadius: 3, overflow: 'hidden' }}>
+                <div style={{ width: `${discoverProgress}%`, height: '100%', background: 'var(--accent-1)', transition: 'width 0.5s ease-out' }} />
+              </div>
             </div>
           )}
+          </div>
         </div>
+        </ScrollArea>
       )}
 
       {/* ── Step 2: Target Selection ── */}
       {step === 2 && discovered && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+        <div className="flex-1 flex flex-col h-full overflow-hidden w-full" style={{ gap: 16 }}>
 
           {/* Summary bar */}
           <div style={{
@@ -349,11 +364,11 @@ export function Generate() {
             </span>
           </div>
 
-          <div className="grid-2" style={{ alignItems: 'start' }}>
+          <div className="grid-2 flex-1 overflow-hidden" style={{ alignItems: 'stretch', minHeight: 0 }}>
 
             {/* Companies column */}
-            <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-              <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div className="card flex-1 flex flex-col overflow-hidden" style={{ padding: 0 }}>
+              <div className="shrink-0" style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10 }}>
                 <input type="checkbox" id="select-all-companies"
                   checked={allCompaniesSelected}
                   onChange={toggleAllCompanies}
@@ -373,7 +388,7 @@ export function Generate() {
                   No companies found for this domain.
                 </div>
               ) : (
-                <div style={{ maxHeight: 420, overflowY: 'auto' }}>
+                <ScrollArea className="flex-1 w-full">
                   {discovered.companies.map(c => (
                     <div key={c.id}
                       onClick={() => toggleCompany(c.id)}
@@ -409,13 +424,13 @@ export function Generate() {
                       </div>
                     </div>
                   ))}
-                </div>
+                </ScrollArea>
               )}
             </div>
 
             {/* Individuals column */}
-            <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-              <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div className="card flex-1 flex flex-col overflow-hidden" style={{ padding: 0 }}>
+              <div className="shrink-0" style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10 }}>
                 <input type="checkbox" id="select-all-individuals"
                   checked={allIndividualsSelected}
                   onChange={toggleAllIndividuals}
@@ -435,7 +450,7 @@ export function Generate() {
                   No individuals found. Add Serper/Hunter keys for contact discovery.
                 </div>
               ) : (
-                <div style={{ maxHeight: 420, overflowY: 'auto' }}>
+                <ScrollArea className="flex-1 w-full">
                   {discovered.individuals.map(i => (
                     <div key={i.id}
                       onClick={() => toggleIndividual(i.id)}
@@ -469,21 +484,21 @@ export function Generate() {
                       </div>
                     </div>
                   ))}
-                </div>
+                </ScrollArea>
               )}
             </div>
           </div>
 
           {/* Generate bar */}
-          <div style={{
+          <div className="shrink-0" style={{
             display: 'flex', alignItems: 'center', gap: 16,
             padding: '16px 20px', background: 'var(--bg-glass)',
             border: '1px solid var(--border)', borderRadius: 'var(--radius-md)',
-            position: 'sticky', bottom: 16,
+            marginTop: 8,
           }}>
             <span className="text-sm">
               {totalSelected === 0
-                ? 'Select targets above to generate emails'
+                ? 'Select targets above to start campaign'
                 : <><strong>{totalSelected}</strong> target{totalSelected !== 1 ? 's' : ''} selected</>}
             </span>
             <button className="btn btn-primary btn-lg" style={{ marginLeft: 'auto' }}
@@ -497,12 +512,12 @@ export function Generate() {
 
       {/* ── Step 3: Generation Progress ── */}
       {step === 3 && (
+        <ScrollArea className="flex-1 w-full">
         <div className="card" style={{ maxWidth: 700 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 20 }}>
-            <Spinner size="lg" />
-            <div>
-              <div style={{ fontWeight: 600 }}>Generating personalized emails…</div>
-              <div className="text-sm text-muted">Running 3-call AI pipeline per target. This may take 1–2 minutes.</div>
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', padding: '12px 16px', borderRadius: 'var(--radius-md)', marginBottom: 20 }}>
+            <div style={{ fontSize: '1.2rem' }}>⏳</div>
+            <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+              <span style={{ color: 'var(--text)', fontWeight: 600 }}>Please be patient.</span> We are running our 3-call AI pipeline per target to generate highly personalized emails. This can take up to 3-4 minutes to complete. Hold tight!
             </div>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -521,10 +536,12 @@ export function Generate() {
             ))}
           </div>
         </div>
+        </ScrollArea>
       )}
 
       {/* ── Step 4: Review Results ── */}
       {step === 4 && genResults.length > 0 && (
+        <ScrollArea className="flex-1 w-full">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
           <div className="flex justify-between items-center">
             <div>
@@ -588,7 +605,9 @@ export function Generate() {
             <a href="#drafts" className="btn btn-secondary btn-sm">View All Drafts →</a>
           </div>
         </div>
+        </ScrollArea>
       )}
+      </div>
     </div>
   );
 }
@@ -602,6 +621,44 @@ function EmailResultCard({ result: r, idx, onDeleted, onRegenerated, selected, o
   const [regenerating, setRegenerating] = useState(false);
   const [showRegenInput, setShowRegenInput] = useState(false);
   const [regenFeedback, setRegenFeedback] = useState('');
+
+  const [editing, setEditing] = useState(false);
+  const [editSubject, setEditSubject] = useState(r.subject);
+  const [editBody, setEditBody] = useState(r.body);
+  const [saving, setSaving] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(r.status === 'SENT');
+
+  const handleSave = async () => {
+    if (!r.email_id) return;
+    setSaving(true);
+    try {
+      const updated = await api.updateEmail(r.email_id, { subject: editSubject, body: editBody });
+      onRegenerated(updated);
+      setEditing(false);
+      toast('Draft updated!', 'success');
+    } catch (e) {
+      toast(`Update failed: ${e.message}`, 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSend = async () => {
+    if (!r.email_id) return;
+    setSending(true);
+    try {
+      await api.sendEmailDirectly(r.email_id);
+      setSent(true);
+      toast('Email sent directly! 🚀', 'success');
+      // Update selected state to remove this one since it's no longer a draft
+      if (selected) onToggle();
+    } catch (e) {
+      toast(`Send failed: ${e.message}`, 'error');
+    } finally {
+      setSending(false);
+    }
+  };
 
   const handleDelete = async () => {
     if (!r.email_id) return;
@@ -668,55 +725,113 @@ function EmailResultCard({ result: r, idx, onDeleted, onRegenerated, selected, o
       {/* Email Content */}
       {r.status === 'ok' ? (
         <>
-          <div style={{
-            padding: '8px 14px', background: 'var(--bg-glass)',
-            borderRadius: 'var(--radius-sm)', marginBottom: 12,
-            fontWeight: 600, fontSize: '0.9rem',
-            borderLeft: '3px solid var(--accent-1)',
-          }}>
-            {r.subject}
-          </div>
-          <div className="email-preview" style={{ whiteSpace: 'pre-wrap', lineHeight: 1.7 }}>
-            {r.body}
-          </div>
+          {editing ? (
+            <div style={{ padding: '10px 0', display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <input
+                className="form-input"
+                value={editSubject}
+                onChange={e => setEditSubject(e.target.value)}
+                placeholder="Subject"
+              />
+              <textarea
+                className="form-input"
+                value={editBody}
+                onChange={e => setEditBody(e.target.value)}
+                style={{ height: 250, resize: 'vertical' }}
+              />
+              <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                <button className="btn btn-primary btn-sm" onClick={handleSave} disabled={saving}>
+                  {saving ? <Spinner /> : '💾 Save'}
+                </button>
+                <button className="btn btn-secondary btn-sm" onClick={() => {
+                  setEditing(false);
+                  setEditSubject(r.subject);
+                  setEditBody(r.body);
+                }} disabled={saving}>Cancel</button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div style={{
+                padding: '8px 14px', background: 'var(--bg-glass)',
+                borderRadius: 'var(--radius-sm)', marginBottom: 12,
+                fontWeight: 600, fontSize: '0.9rem',
+                borderLeft: '3px solid var(--accent-1)',
+              }}>
+                {r.subject}
+              </div>
+              <div className="email-preview" style={{ whiteSpace: 'pre-wrap', lineHeight: 1.7 }}>
+                {r.body}
+              </div>
+            </>
+          )}
 
           {/* ── Action Buttons ── */}
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 10,
-            marginTop: 16, paddingTop: 14,
-            borderTop: '1px solid var(--border)',
-          }}>
-            <button
-              className="btn btn-sm"
-              style={{
-                background: 'rgba(239,68,68,0.08)',
-                color: '#ef4444', border: '1px solid rgba(239,68,68,0.25)',
-              }}
-              disabled={deleting}
-              onClick={handleDelete}
-            >
-              {deleting ? <Spinner /> : '🗑️ Delete'}
-            </button>
+          {!sent ? (
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 10,
+              marginTop: 16, paddingTop: 14,
+              borderTop: '1px solid var(--border)',
+              flexWrap: 'wrap'
+            }}>
+              <button
+                className="btn btn-sm"
+                style={{
+                  background: 'rgba(239,68,68,0.08)',
+                  color: '#ef4444', border: '1px solid rgba(239,68,68,0.25)',
+                }}
+                disabled={deleting || editing}
+                onClick={handleDelete}
+              >
+                {deleting ? <Spinner /> : '🗑️ Delete'}
+              </button>
 
-            <button
-              className="btn btn-sm"
-              style={{
-                background: showRegenInput ? 'rgba(59,130,246,0.15)' : 'rgba(59,130,246,0.08)',
-                color: '#3b82f6', border: '1px solid rgba(59,130,246,0.25)',
-              }}
-              disabled={regenerating}
-              onClick={() => setShowRegenInput(!showRegenInput)}
-            >
-              🔄 Regenerate
-            </button>
+              <button
+                className="btn btn-sm"
+                style={{
+                  background: showRegenInput ? 'rgba(59,130,246,0.15)' : 'rgba(59,130,246,0.08)',
+                  color: '#3b82f6', border: '1px solid rgba(59,130,246,0.25)',
+                }}
+                disabled={regenerating || editing}
+                onClick={() => setShowRegenInput(!showRegenInput)}
+              >
+                🔄 Regenerate
+              </button>
+              
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={() => setEditing(true)}
+                disabled={editing}
+              >
+                ✏️ Edit
+              </button>
 
-            <div style={{ marginLeft: 'auto' }}>
-              <CopyButton
-                text={`Subject: ${r.subject}\n\n${r.body}`}
-                label="Copy Full Email"
-              />
+              <button
+                className="btn btn-sm"
+                style={{
+                  background: 'linear-gradient(135deg, #3b82f6, #2563eb)', color: 'white', border: 'none'
+                }}
+                disabled={sending || editing}
+                onClick={handleSend}
+              >
+                {sending ? <Spinner /> : '🚀 Send Directly'}
+              </button>
+
+              <div style={{ marginLeft: 'auto' }}>
+                <CopyButton
+                  text={`Subject: ${r.subject}\n\n${r.body}`}
+                  label="Copy Full Email"
+                />
+              </div>
             </div>
-          </div>
+          ) : (
+            <div style={{
+              marginTop: 16, paddingTop: 14, borderTop: '1px solid var(--border)',
+              color: '#22c55e', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6
+            }}>
+              ✅ Email sent directly!
+            </div>
+          )}
 
           {/* ── Regenerate Feedback Input ── */}
           {showRegenInput && (
@@ -814,38 +929,40 @@ function CampaignList({ onSelect }) {
   if (loading) return <div className="loading-overlay"><Spinner size="lg" /></div>;
 
   return (
-    <div>
-      <div className="page-header">
+    <div className="flex-1 flex flex-col h-full overflow-hidden">
+      <div className="page-header shrink-0">
         <div>
-          <h1 className="page-title">🗂️ Campaigns</h1>
+          <h1 className="page-title"><FolderOpen className="inline-block w-6 h-6 mr-1" style={{ WebkitTextFillColor: 'initial', color: '#818cf8', verticalAlign: '-3px' }} /> Campaigns</h1>
           <p className="page-subtitle">Manage your outreach campaigns</p>
         </div>
       </div>
       {!campaigns?.length ? (
         <EmptyState icon="📋" title="No campaigns yet" text="Create a campaign from the Generate page." />
       ) : (
-        <div className="table-wrapper">
-          <table>
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Domain</th>
-                <th>Status</th>
-                <th>Created</th>
-              </tr>
-            </thead>
-            <tbody>
-              {campaigns.map(c => (
-                <tr key={c.id} onClick={() => onSelect(c.id)} style={{ cursor: 'pointer' }}>
-                  <td style={{ fontWeight: 600 }}>{c.name}</td>
-                  <td>{c.domain_target}</td>
-                  <td><StatusBadge status={c.status} /></td>
-                  <td className="text-sm text-muted">{fmtDate(c.created_at)}</td>
+        <ScrollArea className="flex-1 w-full rounded-md border border-white/10 bg-black/20">
+          <div className="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Domain</th>
+                  <th>Status</th>
+                  <th>Created</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {campaigns.map(c => (
+                  <tr key={c.id} onClick={() => onSelect(c.id)} style={{ cursor: 'pointer' }}>
+                    <td style={{ fontWeight: 600 }}>{c.name}</td>
+                    <td>{c.domain_target}</td>
+                    <td><StatusBadge status={c.status} /></td>
+                    <td className="text-sm text-muted">{fmtDate(c.created_at)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </ScrollArea>
       )}
     </div>
   );
@@ -861,6 +978,7 @@ function CampaignDetail({ campaignId, onBack }) {
   const [editMode, setEditMode] = useState(false);
   const [editSubject, setEditSubject] = useState('');
   const [editBody, setEditBody] = useState('');
+  const [editRecipientEmail, setEditRecipientEmail] = useState('');
   const [saving, setSaving] = useState(false);
 
   // Selection & Generation for Targets tab
@@ -886,12 +1004,13 @@ function CampaignDetail({ campaignId, onBack }) {
     setEditMode(false);
     setEditSubject(email.subject || '');
     setEditBody(email.body || '');
+    setEditRecipientEmail(email.recipient_email || '');
   };
 
   const save = async () => {
     setSaving(true);
     try {
-      const updated = await api.updateEmail(selectedEmail.id, { subject: editSubject, body: editBody });
+      const updated = await api.updateEmail(selectedEmail.id, { subject: editSubject, body: editBody, recipient_email: editRecipientEmail });
       setSelectedEmail(updated);
       setEditMode(false);
       toast('Email updated', 'success');
@@ -904,6 +1023,16 @@ function CampaignDetail({ campaignId, onBack }) {
     try {
       await api.approveEmail(id);
       toast('Email approved ✅', 'success');
+      setSelectedEmail(null);
+      reloadEmails();
+    } catch (e) { toast(e.message, 'error'); }
+  };
+
+  const sendDirectly = async (id) => {
+    try {
+      toast('Sending email...', 'info');
+      await api.sendEmailDirectly(id);
+      toast('Email sent successfully 🚀', 'success');
       setSelectedEmail(null);
       reloadEmails();
     } catch (e) { toast(e.message, 'error'); }
@@ -997,8 +1126,8 @@ function CampaignDetail({ campaignId, onBack }) {
   if (!campaign) return <div>Campaign not found.</div>;
 
   return (
-    <div>
-      <div className="page-header">
+    <div className="flex-1 flex flex-col h-full overflow-hidden">
+      <div className="page-header shrink-0">
         <div>
           <button className="btn btn-secondary btn-sm mb-2" onClick={onBack}>← Back to Campaigns</button>
           <h1 className="page-title">{campaign.name}</h1>
@@ -1006,100 +1135,112 @@ function CampaignDetail({ campaignId, onBack }) {
         </div>
       </div>
 
-      <div style={{ display: 'flex', gap: 10, marginBottom: 20, borderBottom: '1px solid var(--border)', paddingBottom: 10 }}>
+      <div className="shrink-0" style={{ display: 'flex', gap: 10, marginBottom: 20, borderBottom: '1px solid var(--border)', paddingBottom: 10 }}>
         <button className={`btn ${tab === 'targets' ? 'btn-primary' : 'btn-secondary'} btn-sm`} onClick={() => setTab('targets')}>Targets ({companies?.length + individuals?.length || 0})</button>
         <button className={`btn ${tab === 'emails' ? 'btn-primary' : 'btn-secondary'} btn-sm`} onClick={() => setTab('emails')}>Emails ({emails?.length || 0})</button>
       </div>
 
       {tab === 'targets' && (
-        <>
-          <div style={{ display: 'flex', gap: 10, marginBottom: 16 }}>
+        <div className="flex-1 flex flex-col overflow-hidden w-full pr-4">
+          <div className="shrink-0" style={{ display: 'flex', gap: 10, marginBottom: 16 }}>
             <button className="btn btn-sm btn-secondary" onClick={selectUndrafted}>
               ✓ Select Undrafted
             </button>
             <button className="btn btn-sm btn-primary" onClick={generateSelected} disabled={generating || (selectedCompanyIds.size === 0 && selectedIndividualIds.size === 0)}>
-              {generating ? <Spinner /> : '⚡'} Generate Emails for Selected
+              {generating ? <Spinner /> : '⚡'} Start Campaign for Selected
             </button>
           </div>
-          <div className="grid-2">
-            <div className="card">
-              <h3 className="card-title mb-4">Companies Discovered</h3>
-              {compLoading ? <Spinner /> : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {companies?.map(c => {
-                    const isDrafted = emails?.some(e => 
-                      (e.target_type === 'company' && e.target_id === c.id) ||
-                      (e.company_name === c.name)
-                    );
-                    const isSelected = selectedCompanyIds.has(c.id);
-                    return (
-                      <div key={c.id} style={{ 
-                        padding: 10, background: isSelected ? 'var(--bg-glass)' : 'var(--bg-card)', 
-                        border: '1px solid', borderColor: isSelected ? 'var(--accent-1)' : 'var(--border)',
-                        borderRadius: 'var(--radius-sm)', display: 'flex', alignItems: 'flex-start', gap: 10
-                      }}>
-                        <input type="checkbox" checked={isSelected} style={{ marginTop: 4, cursor: 'pointer' }}
-                          onChange={(e) => {
-                            const next = new Set(selectedCompanyIds);
-                            e.target.checked ? next.add(c.id) : next.delete(c.id);
-                            setSelectedCompanyIds(next);
-                          }} />
-                        <div style={{ flex: 1 }}>
-                          <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
-                            {c.name}
-                            {isDrafted && <span className="badge" style={{ background: 'rgba(34,197,94,0.15)', color: '#22c55e', fontSize: '0.65rem' }}>Drafted</span>}
+          <div className="grid-2 shrink-0">
+            <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+              <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)' }}>
+                <h3 className="card-title" style={{ margin: 0 }}>Companies Discovered</h3>
+              </div>
+              {compLoading ? <div style={{ padding: 16 }}><Spinner /></div> : (
+                <ScrollArea className="h-[420px] w-full">
+                  <div style={{ display: 'flex', flexDirection: 'column' }}>
+                    {companies?.map(c => {
+                      const isDrafted = emails?.some(e => 
+                        (e.target_type === 'company' && e.target_id === c.id) ||
+                        (e.company_name === c.name)
+                      );
+                      const isSelected = selectedCompanyIds.has(c.id);
+                      return (
+                        <div key={c.id} style={{ 
+                          padding: '12px 16px', borderBottom: '1px solid var(--border)',
+                          background: isSelected ? 'var(--bg-glass)' : 'transparent', 
+                          display: 'flex', alignItems: 'flex-start', gap: 12, cursor: 'pointer',
+                          transition: 'background 0.15s'
+                        }}
+                        onClick={() => {
+                          const next = new Set(selectedCompanyIds);
+                          next.has(c.id) ? next.delete(c.id) : next.add(c.id);
+                          setSelectedCompanyIds(next);
+                        }}>
+                          <input type="checkbox" checked={isSelected} style={{ marginTop: 3, cursor: 'pointer', flexShrink: 0 }}
+                            onChange={() => {}} />
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.9rem', marginBottom: 4 }}>
+                              {c.name}
+                              {isDrafted && <span className="badge" style={{ background: 'rgba(34,197,94,0.15)', color: '#22c55e', fontSize: '0.65rem' }}>Drafted</span>}
+                            </div>
+                            <div className="text-xs text-muted">{c.website}</div>
                           </div>
-                          <div className="text-xs text-muted">{c.website}</div>
                         </div>
-                      </div>
-                    );
-                  })}
-                  {!companies?.length && <div className="text-sm text-muted">No companies found.</div>}
-                </div>
+                      );
+                    })}
+                    {!companies?.length && <div style={{ padding: '20px 16px', color: 'var(--text-muted)', fontSize: '0.875rem', textAlign: 'center' }}>No companies found.</div>}
+                  </div>
+                </ScrollArea>
               )}
             </div>
-            <div className="card">
-              <h3 className="card-title mb-4">Individuals Discovered</h3>
-              {indLoading ? <Spinner /> : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {individuals?.map(i => {
-                    const isDrafted = emails?.some(e => e.target_type === 'individual' && e.target_id === i.id);
-                    const isSelected = selectedIndividualIds.has(i.id);
-                    return (
-                      <div key={i.id} style={{ 
-                        padding: 10, background: isSelected ? 'var(--bg-glass)' : 'var(--bg-card)', 
-                        border: '1px solid', borderColor: isSelected ? 'var(--accent-1)' : 'var(--border)',
-                        borderRadius: 'var(--radius-sm)', display: 'flex', alignItems: 'flex-start', gap: 10
-                      }}>
-                        <input type="checkbox" checked={isSelected} style={{ marginTop: 4, cursor: 'pointer' }}
-                          onChange={(e) => {
-                            const next = new Set(selectedIndividualIds);
-                            e.target.checked ? next.add(i.id) : next.delete(i.id);
-                            setSelectedIndividualIds(next);
-                          }} />
-                        <div style={{ flex: 1 }}>
-                          <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
-                            {i.name}
-                            {isDrafted && <span className="badge" style={{ background: 'rgba(34,197,94,0.15)', color: '#22c55e', fontSize: '0.65rem' }}>Drafted</span>}
-                          </div>
-                          <div className="text-xs text-muted">
-                            {i.email ? `✉️ ${i.email}` : <span style={{ color: '#ef4444' }}>Email not found</span>} · {companies?.find(c => c.id === i.company_id)?.name || 'Unknown Company'}
+            <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+              <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)' }}>
+                <h3 className="card-title" style={{ margin: 0 }}>Individuals Discovered</h3>
+              </div>
+              {indLoading ? <div style={{ padding: 16 }}><Spinner /></div> : (
+                <ScrollArea className="h-[420px] w-full">
+                  <div style={{ display: 'flex', flexDirection: 'column' }}>
+                    {individuals?.map(i => {
+                      const isDrafted = emails?.some(e => e.target_type === 'individual' && e.target_id === i.id);
+                      const isSelected = selectedIndividualIds.has(i.id);
+                      return (
+                        <div key={i.id} style={{ 
+                          padding: '12px 16px', borderBottom: '1px solid var(--border)',
+                          background: isSelected ? 'var(--bg-glass)' : 'transparent', 
+                          display: 'flex', alignItems: 'flex-start', gap: 12, cursor: 'pointer',
+                          transition: 'background 0.15s'
+                        }}
+                        onClick={() => {
+                          const next = new Set(selectedIndividualIds);
+                          next.has(i.id) ? next.delete(i.id) : next.add(i.id);
+                          setSelectedIndividualIds(next);
+                        }}>
+                          <input type="checkbox" checked={isSelected} style={{ marginTop: 3, cursor: 'pointer', flexShrink: 0 }}
+                            onChange={() => {}} />
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.9rem', marginBottom: 4 }}>
+                              {i.name}
+                              {isDrafted && <span className="badge" style={{ background: 'rgba(34,197,94,0.15)', color: '#22c55e', fontSize: '0.65rem' }}>Drafted</span>}
+                            </div>
+                            <div className="text-xs text-muted">
+                              {i.email ? <span className="font-mono text-muted">{i.email}</span> : <span style={{ color: '#ef4444' }}>Email not found</span>} · {companies?.find(c => c.id === i.company_id)?.name || 'Unknown Company'}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    );
-                  })}
-                  {!individuals?.length && <div className="text-sm text-muted">No individuals found.</div>}
-                </div>
+                      );
+                    })}
+                    {!individuals?.length && <div style={{ padding: '20px 16px', color: 'var(--text-muted)', fontSize: '0.875rem', textAlign: 'center' }}>No individuals found.</div>}
+                  </div>
+                </ScrollArea>
               )}
             </div>
           </div>
-        </>
+        </div>
       )}
 
       {tab === 'emails' && (
-        <div>
-          <div className="flex gap-2 mb-4">
+        <div className="flex-1 flex flex-col overflow-hidden">
+          <div className="flex gap-2 mb-4 shrink-0">
             <select className="form-select" style={{ width: 'auto' }} value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
               <option value="">All statuses</option>
               <option value="DRAFTED">Drafted</option>
@@ -1114,40 +1255,45 @@ function CampaignDetail({ campaignId, onBack }) {
           {emailsLoading ? <Spinner /> : !emails?.length ? (
             <EmptyState icon="📬" title="No emails yet" text="No emails drafted for this campaign." />
           ) : (
-            <div className="table-wrapper">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Recipient</th>
-                    <th>Company</th>
-                    <th>Subject</th>
-                    <th>Status</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {emails.map(e => (
-                    <tr key={e.id} onClick={() => openDetail(e)} style={{ cursor: 'pointer' }}>
-                      <td>
-                        <div style={{ fontWeight: 600 }}>{e.recipient_name || '—'}</div>
-                        <div className="text-xs font-mono text-muted">{e.recipient_email || '—'}</div>
-                      </td>
-                      <td className="text-sm">{e.company_name || '—'}</td>
-                      <td className="text-sm">{truncate(e.subject, 50)}</td>
-                      <td><StatusBadge status={e.status} /></td>
-                      <td onClick={ev => ev.stopPropagation()}>
-                        <div className="flex gap-1">
-                          {e.status === 'DRAFTED' && (
-                            <button className="btn btn-primary btn-sm" onClick={() => approve(e.id)}>✅ Approve</button>
-                          )}
-                          <button className="btn btn-secondary btn-sm" onClick={() => openDetail(e)}>View</button>
-                        </div>
-                      </td>
+            <ScrollArea className="flex-1 w-full rounded-md border border-white/10 bg-black/20">
+              <div className="table-wrapper">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Recipient</th>
+                      <th>Company</th>
+                      <th>Subject</th>
+                      <th>Status</th>
+                      <th>Actions</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {emails.map(e => (
+                      <tr key={e.id} onClick={() => openDetail(e)} style={{ cursor: 'pointer' }}>
+                        <td>
+                          <div style={{ fontWeight: 600 }}>{e.recipient_name || '—'}</div>
+                          <div className="text-xs font-mono text-muted">{e.recipient_email || '—'}</div>
+                        </td>
+                        <td className="text-sm">{e.company_name || '—'}</td>
+                        <td className="text-sm">{truncate(e.subject, 50)}</td>
+                        <td><StatusBadge status={e.status} /></td>
+                        <td onClick={ev => ev.stopPropagation()}>
+                          <div className="flex gap-1">
+                            {e.status === 'drafted' && (
+                              <>
+                                <button className="btn btn-primary btn-sm" onClick={() => approve(e.id)}>✅ Approve</button>
+                                <button className="btn btn-sm" style={{ background: 'linear-gradient(135deg, #3b82f6, #2563eb)', color: 'white', border: 'none' }} onClick={(ev) => { ev.stopPropagation(); sendDirectly(e.id); }}>🚀 Send Directly</button>
+                              </>
+                            )}
+                            <button className="btn btn-secondary btn-sm" onClick={() => openDetail(e)}>View</button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </ScrollArea>
           )}
         </div>
       )}
@@ -1169,8 +1315,9 @@ function CampaignDetail({ campaignId, onBack }) {
                   </>
                 ) : (
                   <>
-                    {selectedEmail.status === 'DRAFTED' && <button className="btn btn-secondary btn-sm" onClick={() => setEditMode(true)}>✏️ Edit</button>}
-                    {selectedEmail.status === 'DRAFTED' && <button className="btn btn-primary btn-sm" onClick={() => approve(selectedEmail.id)}>✅ Approve</button>}
+                    {selectedEmail.status === 'drafted' && <button className="btn btn-secondary btn-sm" onClick={() => setEditMode(true)}>✏️ Edit</button>}
+                    {selectedEmail.status === 'drafted' && <button className="btn btn-primary btn-sm" onClick={() => approve(selectedEmail.id)}>✅ Approve</button>}
+                    {selectedEmail.status === 'drafted' && <button className="btn btn-sm" style={{ background: 'linear-gradient(135deg, #3b82f6, #2563eb)', color: 'white', border: 'none' }} onClick={() => sendDirectly(selectedEmail.id)}>🚀 Send Directly</button>}
                     <button className="btn btn-secondary btn-sm" onClick={() => regenerate(selectedEmail.id)}>🔄 Regenerate</button>
                     <PushToGmailButton emailId={selectedEmail.id} />
                   </>
@@ -1186,6 +1333,10 @@ function CampaignDetail({ campaignId, onBack }) {
 
             {editMode ? (
               <>
+                <div className="form-group">
+                  <label className="form-label">Recipient Email</label>
+                  <input className="form-input" value={editRecipientEmail} onChange={e => setEditRecipientEmail(e.target.value)} />
+                </div>
                 <div className="form-group">
                   <label className="form-label">Subject</label>
                   <input className="form-input" value={editSubject} onChange={e => setEditSubject(e.target.value)} />

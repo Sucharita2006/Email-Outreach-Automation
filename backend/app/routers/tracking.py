@@ -16,6 +16,7 @@ Endpoints:
   GET  /auth/gmail/callback                  — Handle OAuth callback
 """
 
+import re
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -29,6 +30,7 @@ from app.database.models import OutreachEmail, EmailStatus
 from app.services import tracker_service, followup_service, gmail_service
 
 router = APIRouter()
+auth_router = APIRouter()
 
 
 # ════════════════════════════════════════════════════════════
@@ -246,7 +248,42 @@ async def push_to_gmail(
     return {**result, "email_id": email_id}
 
 
-@router.get("/auth/gmail/status")
+@router.post("/{email_id}/send-directly")
+async def send_directly(
+    email_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Send an email draft directly via Gmail API and mark it as SENT.
+    """
+    email = await _get_email_or_404(email_id, db)
+
+    if not email.subject or not email.body:
+        raise HTTPException(status_code=400, detail="Email has no subject or body to send.")
+    if not email.recipient_email:
+        raise HTTPException(status_code=400, detail="Email has no recipient email address.")
+    if email.status != EmailStatus.DRAFTED:
+        raise HTTPException(status_code=400, detail="Only drafted emails can be sent directly.")
+
+    result = await gmail_service.send_email(
+        to_email=email.recipient_email,
+        to_name=email.recipient_name or "",
+        subject=email.subject,
+        body=email.body,
+    )
+
+    if result.get("status") != "ok":
+        raise HTTPException(status_code=400, detail=result.get("message", "Failed to send email via Gmail."))
+
+    email.status = EmailStatus.SENT
+    email.sent_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    await db.flush()
+    await db.commit()
+
+    return {**result, "email_id": email_id}
+
+
+@auth_router.get("/auth/gmail/status")
 async def gmail_auth_status():
     """Check whether Gmail OAuth credentials are configured and authenticated."""
     return {
@@ -255,12 +292,12 @@ async def gmail_auth_status():
         "message": (
             "Ready to push drafts to Gmail."
             if gmail_service.is_authenticated()
-            else "Visit /tracking/auth/gmail/authorize to connect Gmail."
+            else "Click Connect Gmail to authorize."
         ),
     }
 
 
-@router.get("/auth/gmail/authorize")
+@auth_router.get("/auth/gmail/authorize")
 async def gmail_authorize():
     """
     Get the Gmail OAuth 2.0 authorization URL.
@@ -270,7 +307,7 @@ async def gmail_authorize():
     return result
 
 
-@router.get("/auth/gmail/callback")
+@auth_router.get("/auth/gmail/callback")
 async def gmail_callback(
     code: str = Query(...),
     state: str = Query(""),
@@ -279,7 +316,7 @@ async def gmail_callback(
     Handle the Gmail OAuth callback after user grants access.
     Exchange authorization code for access + refresh tokens.
     """
-    result = gmail_service.handle_oauth_callback(code=code, state=state)
+    result = await gmail_service.handle_oauth_callback(code=code, state=state)
     return result
 
 
@@ -295,7 +332,7 @@ async def poll_gmail_replies(
     Marks matching emails as replied in the DB.
     Requires: Gmail OAuth authentication.
     """
-    if not gmail_service.is_authenticated():
+    if not await gmail_service.is_authenticated():
         return {
             "status": "not_authenticated",
             "message": "Visit /tracking/auth/gmail/authorize to connect Gmail first.",
@@ -323,23 +360,24 @@ async def poll_gmail_replies(
 
     for reply in inbox_replies:
         reply_subject = reply.get("subject", "")
-        # Match "Re: {original subject}"
-        original_subject = reply_subject.replace("Re: ", "").replace("RE: ", "").strip()
+        reply_subject_clean = re.sub(r'^(?i:re|fwd|fw|aw):\s*', '', reply_subject).strip().lower()
         matched_email = next(
-            (e for e in sent_emails if e.subject and e.subject.strip() == original_subject),
+            (e for e in sent_emails if e.subject and e.subject.strip().lower() == reply_subject_clean),
             None
         )
         if matched_email and matched_email.status != EmailStatus.REPLIED:
+            # Use the full body from Gmail; fall back to snippet
+            reply_body = reply.get("body") or reply.get("snippet", "")
             await tracker_service.mark_replied(
                 email=matched_email,
                 db=db,
-                reply_snippet=reply.get("snippet", ""),
+                reply_snippet=reply_body,
                 sentiment="neutral",
             )
             new_replies += 1
             reply_details.append({
                 "email_id": matched_email.id,
-                "subject": original_subject,
+                "subject": reply_subject_clean,
                 "sender": reply.get("sender"),
             })
 

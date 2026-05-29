@@ -20,15 +20,50 @@ persist them encrypted in the database.
 
 import base64
 import json
+import os
 import re
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from pathlib import Path
 from typing import Optional
 
 from app.config import settings
 
-# ── In-memory token store (MVP — replace with DB in production) ─
-_token_store: dict = {}  # {"access_token": ..., "refresh_token": ..., "expiry": ...}
+from app.database.session import AsyncSessionLocal
+from app.database.models import SystemSetting
+from sqlalchemy import select
+
+# ── Database-based token store (persists across container restarts) ─────
+_token_store: dict = {}  # runtime cache
+_token_store_loaded = False
+
+
+async def _load_token_store():
+    """Load token store from database if not loaded yet."""
+    global _token_store, _token_store_loaded
+    if _token_store_loaded:
+        return
+    _token_store_loaded = True
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(SystemSetting).where(SystemSetting.key == "gmail_tokens"))
+        setting = result.scalar_one_or_none()
+        if setting:
+            _token_store["credentials"] = setting.value
+
+
+async def _save_token_store():
+    """Persist credentials to database."""
+    creds = _token_store.get("credentials")
+    if creds:
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(select(SystemSetting).where(SystemSetting.key == "gmail_tokens"))
+            setting = result.scalar_one_or_none()
+            if setting:
+                setting.value = creds
+            else:
+                setting = SystemSetting(key="gmail_tokens", value=creds)
+                db.add(setting)
+            await db.commit()
 
 SCOPES = [
     "https://www.googleapis.com/auth/gmail.compose",  # Create drafts
@@ -39,6 +74,7 @@ SCOPES = [
 def is_configured() -> bool:
     """Check if Gmail OAuth credentials are set in .env."""
     return bool(settings.GMAIL_CLIENT_ID and settings.GMAIL_CLIENT_SECRET)
+
 
 
 def get_authorization_url() -> dict:
@@ -86,7 +122,7 @@ def get_authorization_url() -> dict:
         return {"status": "error", "message": str(e)}
 
 
-def handle_oauth_callback(code: str, state: str) -> dict:
+async def handle_oauth_callback(code: str, state: str) -> dict:
     """
     Handle the OAuth callback and exchange code for tokens.
     Called from the /auth/gmail/callback endpoint.
@@ -106,6 +142,7 @@ def handle_oauth_callback(code: str, state: str) -> dict:
             "client_secret": creds.client_secret,
             "scopes": list(creds.scopes or SCOPES),
         }
+        await _save_token_store()  # persist to db
         return {
             "status": "ok",
             "message": "Gmail OAuth successful. You can now create drafts.",
@@ -115,11 +152,12 @@ def handle_oauth_callback(code: str, state: str) -> dict:
         return {"status": "error", "message": str(e)}
 
 
-def _get_gmail_service():
+async def _get_gmail_service():
     """
     Build and return an authenticated Gmail API service.
     Raises RuntimeError if not authenticated.
     """
+    await _load_token_store()
     if "credentials" not in _token_store:
         raise RuntimeError("Gmail not authenticated. Visit /auth/gmail/authorize first.")
 
@@ -136,13 +174,19 @@ def _get_gmail_service():
             client_secret=creds_data.get("client_secret", settings.GMAIL_CLIENT_SECRET),
             scopes=creds_data.get("scopes", SCOPES),
         )
-        return build("gmail", "v1", credentials=creds, cache_discovery=False)
+        service = build("gmail", "v1", credentials=creds, cache_discovery=False)
+        # If token was refreshed, persist the new one
+        if creds.token != creds_data["token"]:
+            _token_store["credentials"]["token"] = creds.token
+            await _save_token_store()
+        return service
     except ImportError:
         raise RuntimeError("Install: pip install google-api-python-client google-auth")
 
 
-def is_authenticated() -> bool:
+async def is_authenticated() -> bool:
     """Return True if Gmail OAuth tokens are available."""
+    await _load_token_store()
     return "credentials" in _token_store
 
 
@@ -189,7 +233,7 @@ async def create_draft(
     Returns:
         {status, draft_id, gmail_link}
     """
-    if not is_authenticated():
+    if not await is_authenticated():
         return {
             "status": "not_authenticated",
             "message": "Gmail OAuth required. Visit /auth/gmail/authorize",
@@ -199,7 +243,7 @@ async def create_draft(
         return {"status": "error", "message": "to_email, subject, and body are required."}
 
     try:
-        service = _get_gmail_service()
+        service = await _get_gmail_service()
         raw_message = _build_mime_message(
             to_email=to_email,
             to_name=to_name,
@@ -224,13 +268,58 @@ async def create_draft(
         return {"status": "error", "message": f"Gmail API error: {str(e)[:200]}"}
 
 
+async def send_email(
+    to_email: str,
+    to_name: str,
+    subject: str,
+    body: str,
+) -> dict:
+    """
+    Send an email directly through the Gmail API, bypassing the Drafts folder.
+
+    Returns:
+        {status, message_id}
+    """
+    if not await is_authenticated():
+        return {
+            "status": "not_authenticated",
+            "message": "Gmail OAuth required. Visit /auth/gmail/authorize",
+        }
+
+    if not to_email or not subject or not body:
+        return {"status": "error", "message": "to_email, subject, and body are required."}
+
+    try:
+        service = await _get_gmail_service()
+        raw_message = _build_mime_message(
+            to_email=to_email,
+            to_name=to_name,
+            subject=subject,
+            body=body,
+            from_name=settings.NONPROFIT_SENDER_NAME,
+        )
+        msg = service.users().messages().send(
+            userId="me",
+            body={"raw": raw_message},
+        ).execute()
+
+        return {
+            "status": "ok",
+            "message_id": msg.get("id"),
+        }
+    except RuntimeError as e:
+        return {"status": "error", "message": str(e)}
+    except Exception as e:
+        return {"status": "error", "message": f"Gmail API error: {str(e)[:200]}"}
+
+
 async def list_drafts(max_results: int = 10) -> dict:
     """List recent Gmail drafts created by this app."""
-    if not is_authenticated():
+    if not await is_authenticated():
         return {"status": "not_authenticated", "drafts": []}
 
     try:
-        service = _get_gmail_service()
+        service = await _get_gmail_service()
         result = service.users().drafts().list(userId="me", maxResults=max_results).execute()
         return {"status": "ok", "drafts": result.get("drafts", []), "total": result.get("resultSizeEstimate", 0)}
     except Exception as e:
@@ -245,39 +334,100 @@ async def check_inbox_for_replies(
     Poll Gmail inbox for replies matching any of the given subjects.
     Used by the reply tracker to auto-detect responses.
 
-    Returns list of {thread_id, subject, sender, snippet, received_at}
+    Returns list of {thread_id, subject, sender, snippet, body, received_at}
     """
-    if not is_authenticated():
+    if not await is_authenticated():
         return []
 
     try:
-        service = _get_gmail_service()
+        service = await _get_gmail_service()
         from datetime import datetime, timedelta, timezone
-        since_date = (datetime.now(timezone.utc) - timedelta(days=since_days)).strftime("%Y/%m/%d")
+        since_date = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=since_days)).strftime("%Y/%m/%d")
 
+        seen_ids = set()
         replies = []
-        for subject in sent_subjects[:10]:  # Limit to avoid quota issues
-            # Build query: inbox replies to our subject since date
-            query = f"in:inbox subject:\"Re: {subject}\" after:{since_date}"
+        for subject in sent_subjects[:50]:  # Check up to 50
+            safe_subject = subject.replace('"', '').replace("'", "")
+            # Build query: inbox messages matching our subject since date
+            query = f"in:inbox subject:\"{safe_subject}\" after:{since_date}"
             result = service.users().messages().list(
                 userId="me", q=query, maxResults=5
             ).execute()
 
             for msg_ref in result.get("messages", []):
+                msg_id = msg_ref["id"]
+                if msg_id in seen_ids:
+                    continue
+                seen_ids.add(msg_id)
+
+                # Fetch full message to get body text
                 msg = service.users().messages().get(
-                    userId="me", id=msg_ref["id"], format="metadata",
-                    metadataHeaders=["Subject", "From", "Date"]
+                    userId="me", id=msg_id, format="full"
                 ).execute()
                 headers = {h["name"]: h["value"] for h in msg.get("payload", {}).get("headers", [])}
+                body_text = _extract_body_text(msg.get("payload", {}))
+
                 replies.append({
                     "thread_id": msg.get("threadId"),
-                    "message_id": msg.get("id"),
+                    "message_id": msg_id,
                     "subject": headers.get("Subject", ""),
                     "sender": headers.get("From", ""),
                     "snippet": msg.get("snippet", "")[:200],
+                    "body": body_text,
                     "received_at": headers.get("Date", ""),
                 })
 
         return replies
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return []
+
+
+def _extract_body_text(payload: dict) -> str:
+    """
+    Recursively extract plain-text body from a Gmail message payload.
+    Falls back to HTML → stripped text if no plain part found.
+    """
+    if not payload:
+        return ""
+
+    mime_type = payload.get("mimeType", "")
+    body_data = payload.get("body", {}).get("data")
+
+    # Single-part message
+    if body_data and mime_type == "text/plain":
+        return base64.urlsafe_b64decode(body_data).decode("utf-8", errors="replace")
+
+    # Multipart — recurse into parts
+    parts = payload.get("parts", [])
+    plain_text = ""
+    html_text = ""
+    for part in parts:
+        part_mime = part.get("mimeType", "")
+        part_data = part.get("body", {}).get("data")
+        if part_mime == "text/plain" and part_data:
+            plain_text += base64.urlsafe_b64decode(part_data).decode("utf-8", errors="replace")
+        elif part_mime == "text/html" and part_data:
+            html_text += base64.urlsafe_b64decode(part_data).decode("utf-8", errors="replace")
+        elif part.get("parts"):
+            # Nested multipart (e.g. multipart/alternative inside multipart/mixed)
+            nested = _extract_body_text(part)
+            if nested:
+                plain_text += nested
+
+    if plain_text:
+        return plain_text.strip()
+
+    # Fallback: strip HTML tags for a rough text version
+    if html_text:
+        text = re.sub(r'<style[^>]*>.*?</style>', '', html_text, flags=re.DOTALL | re.IGNORECASE)
+        text = re.sub(r'<[^>]+>', ' ', text)
+        text = re.sub(r'\s+', ' ', text).strip()
+        return text[:2000]
+
+    # Last resort: decode whatever body data is there
+    if body_data:
+        return base64.urlsafe_b64decode(body_data).decode("utf-8", errors="replace").strip()
+
+    return ""
