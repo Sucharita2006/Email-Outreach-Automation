@@ -116,6 +116,8 @@ class EmailRead(BaseModel):
     campaign_id: str
     target_type: str
     target_id: str
+    individual_id: Optional[str] = None
+    company_id: Optional[str] = None
     recipient_email: Optional[str]
     recipient_name: Optional[str]
     company_name: Optional[str]
@@ -177,8 +179,8 @@ async def generate_single_email(
 
 
 class CampaignTargetPair(BaseModel):
-    individual_id: str
-    company_id: str
+    individual_id: Optional[str] = None
+    company_id: Optional[str] = None
 
 
 class CampaignTargetsRequest(BaseModel):
@@ -233,6 +235,7 @@ async def generate_emails_for_campaign_targets(
             "company_id": res.get("company_id"),
             "individual_name": res.get("recipient_name"),
             "company_name": res.get("company_name"),
+            "recipient_email": res.get("recipient_email"),
             "status": res.get("status"),
             "subject": res.get("subject"),
             "body": res.get("body"),
@@ -393,16 +396,44 @@ async def approve_email(
     return email
 
 
+@router.delete("/{email_id}")
+async def delete_email(
+    email_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Permanently delete a drafted email.
+    Only drafted or archived emails can be deleted.
+    """
+    email = await _get_email_or_404(email_id, db)
+
+    if email.status not in (EmailStatus.DRAFTED, EmailStatus.ARCHIVED):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot delete an email with status '{email.status}'. Only drafted/archived emails can be deleted."
+        )
+
+    await db.delete(email)
+    await db.commit()
+    return {"status": "ok", "deleted_id": email_id}
+
+
+class RegenerateRequest(BaseModel):
+    force_refresh_analysis: bool = False
+    user_feedback: Optional[str] = None
+
+
 @router.post("/{email_id}/regenerate")
 async def regenerate_email(
     email_id: str,
-    force_refresh_analysis: bool = False,
+    body: RegenerateRequest = RegenerateRequest(),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Regenerate an email draft using the LLM.
+    Optionally accepts user_feedback to guide the regeneration.
     Uses cached analysis unless force_refresh_analysis=True.
-    Creates a NEW draft record and archives the old one.
+    Archives the old draft and creates a new one.
     """
     old_email = await _get_email_or_404(email_id, db)
 
@@ -422,13 +453,23 @@ async def regenerate_email(
     old_email.archived_at = datetime.now(timezone.utc)
     await db.flush()
 
+    # Build previous context with user feedback
+    previous_context = None
+    if body.user_feedback:
+        previous_context = {
+            "previous_subject": old_email.subject,
+            "previous_body": old_email.body,
+            "user_feedback": body.user_feedback,
+        }
+
     # Generate new draft
     result = await research_orchestrator.generate_email_for_target(
         individual=individual,
         company=company,
         campaign_id=old_email.campaign_id,
         db=db,
-        force_refresh_analysis=force_refresh_analysis,
+        force_refresh_analysis=body.force_refresh_analysis,
+        previous_contact=previous_context,
     )
     await db.commit()
 

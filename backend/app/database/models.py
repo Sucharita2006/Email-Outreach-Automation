@@ -70,6 +70,8 @@ class Company(Base):
 
     # Advocacy domain tags (stored as JSON array: ["veganism", "plant-based"])
     domain_tags = Column(JSON, default=list)
+    campaign_ids = Column(JSON, default=list)
+
 
     # Contact info
     website = Column(String(512))
@@ -143,6 +145,8 @@ class Individual(Base):
 
     # Domain tags (may differ from company — person could span domains)
     domain_tags = Column(JSON, default=list)
+    campaign_ids = Column(JSON, default=list)
+
 
     # Relationship status
     known = Column(Boolean, default=False, nullable=False)

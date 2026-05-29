@@ -5,7 +5,7 @@ import { useToast, StatusBadge, Spinner, EmptyState, EnrichDots, Modal, CopyButt
 // ════════════════════════════════════════════════════════════
 //  Dashboard Page
 // ════════════════════════════════════════════════════════════
-export function Dashboard() {
+export function Dashboard({ navigate }) {
   const { data: stats, loading } = useApi(() => api.getStats());
   const { data: dashboard } = useApi(() => api.getDashboard());
   const { data: campaigns } = useApi(() => api.getCampaigns());
@@ -93,7 +93,9 @@ export function Dashboard() {
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {campaigns.slice(0, 5).map(c => (
-                <div key={c.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', borderRadius: 'var(--radius-sm)', background: 'var(--bg-glass)', border: '1px solid var(--border)' }}>
+                <div key={c.id} 
+                     onClick={() => navigate('campaigns', { campaignId: c.id })}
+                     style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', borderRadius: 'var(--radius-sm)', background: 'var(--bg-glass)', border: '1px solid var(--border)', cursor: 'pointer' }}>
                   <div>
                     <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>{c.name}</div>
                     <div className="text-xs text-muted">{c.domain_target} · {fmtDate(c.created_at)}</div>
@@ -118,12 +120,13 @@ export function Dashboard() {
 export function Companies() {
   const toast = useToast();
   const [search, setSearch] = useState('');
+  const [searchType, setSearchType] = useState('name');
   const [selected, setSelected] = useState(null);
   const [enriching, setEnriching] = useState({});
 
   const { data: companies, loading, reload } = useApi(
-    () => search ? api.searchCompanies(search) : api.getCompanies({ limit: 100 }),
-    [search]
+    () => search ? api.searchCompanies(search, searchType) : api.getCompanies({ limit: 100 }),
+    [search, searchType]
   );
 
   const enrich = async (company, type = 'all') => {
@@ -152,14 +155,26 @@ export function Companies() {
       </div>
 
       <div className="flex gap-3 mb-4">
-        <div className="search-bar" style={{ maxWidth: 400, flex: 1 }}>
-          <span className="search-icon">🔍</span>
-          <input
-            className="form-input"
-            placeholder="Search companies by name or domain tag…"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-          />
+        <div style={{ display: 'flex', flex: 1, maxWidth: 500, gap: 10 }}>
+          <select 
+            className="form-input" 
+            style={{ width: '160px', cursor: 'pointer' }}
+            value={searchType}
+            onChange={e => setSearchType(e.target.value)}
+          >
+            <option value="name" style={{ background: 'var(--bg-card)', color: 'var(--text)' }}>Company Name</option>
+            <option value="website" style={{ background: 'var(--bg-card)', color: 'var(--text)' }}>Website Domain</option>
+            <option value="domain_tag" style={{ background: 'var(--bg-card)', color: 'var(--text)' }}>Advocacy Domain</option>
+          </select>
+          <div className="search-bar" style={{ flex: 1 }}>
+            <span className="search-icon">🔍</span>
+            <input
+              className="form-input"
+              placeholder={`Search by ${searchType.replace('_', ' ')}...`}
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+            />
+          </div>
         </div>
         <button className="btn btn-secondary btn-sm" onClick={reload}>🔄 Refresh</button>
       </div>
@@ -174,39 +189,51 @@ export function Companies() {
             <thead>
               <tr>
                 <th>Company</th>
+                <th>Contact Person</th>
+                <th>Email</th>
                 <th>Sector</th>
                 <th>Product</th>
                 <th>Status</th>
-                <th>Enrichment</th>
                 <th>Last Contact</th>
-                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {companies.map(c => (
-                <tr key={c.id} onClick={() => setSelected(c)} style={{ cursor: 'pointer' }}>
-                  <td>
-                    <div style={{ fontWeight: 600 }}>{c.name}</div>
-                    <div className="text-xs text-muted">{c.website || '—'}</div>
-                  </td>
-                  <td>{c.sector || '—'}</td>
-                  <td><span className="text-xs">{c.product_type || '—'}</span></td>
+              {companies.map(c => {
+                let bestContact = null;
+                if (c.individuals && c.individuals.length > 0) {
+                  bestContact = c.individuals.find(i => i.email) || c.individuals[0];
+                }
+                
+                return (
+                  <tr key={c.id} onClick={() => setSelected(c)} style={{ cursor: 'pointer' }}>
+                    <td>
+                      <div style={{ fontWeight: 600 }}>{c.name}</div>
+                      <div className="text-xs text-muted">{c.website || '—'}</div>
+                    </td>
+                    <td>
+                      {bestContact ? (
+                        <>
+                          <div style={{ fontWeight: 500, fontSize: '0.875rem' }}>{bestContact.name}</div>
+                          <div className="text-xs text-muted">{bestContact.role || '—'}</div>
+                        </>
+                      ) : <span className="text-muted">—</span>}
+                    </td>
+                    <td>
+                      {bestContact?.email ? (
+                        <span className="font-mono text-xs">{bestContact.email}</span>
+                      ) : (
+                        <span className="text-xs" style={{ color: '#ef4444' }}>Email not found</span>
+                      )}
+                    </td>
+                    <td>{c.sector || '—'}</td>
+                    <td><span className="text-xs">{c.product_type || '—'}</span></td>
                   <td>
                     {c.known ? <span className="badge badge-replied">Known</span> : <span className="badge badge-drafted">Target</span>}
                   </td>
-                  <td><EnrichDotsFetcher companyId={c.id} /></td>
                   <td className="text-xs text-muted">{fmtDate(c.last_contacted_at)}</td>
-                  <td onClick={e => e.stopPropagation()}>
-                    <button
-                      className="btn btn-secondary btn-sm"
-                      disabled={!!enriching[c.id]}
-                      onClick={() => enrich(c, 'all')}
-                    >
-                      {enriching[c.id] ? <><Spinner /> Enriching…</> : '⚡ Enrich All'}
-                    </button>
-                  </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -328,11 +355,8 @@ export function Individuals() {
               <tr>
                 <th>Name</th>
                 <th>Role</th>
-                <th>Company</th>
                 <th>Email</th>
-                <th>DISC</th>
-                <th>Enrichment</th>
-                <th>Actions</th>
+                <th>Last Contact</th>
               </tr>
             </thead>
             <tbody>
@@ -340,19 +364,8 @@ export function Individuals() {
                 <tr key={ind.id} onClick={() => setSelected(ind)} style={{ cursor: 'pointer' }}>
                   <td>{ind.name}</td>
                   <td className="text-sm text-secondary">{ind.role || '—'}</td>
-                  <td className="text-sm text-secondary">{ind.company_name || '—'}</td>
                   <td className="text-xs font-mono">{ind.email || '—'}</td>
-                  <td>
-                    <span className={`disc-chip disc-${ind.humantic_disc || 'UNKNOWN'}`}>
-                      {ind.humantic_disc || '?'}
-                    </span>
-                  </td>
-                  <td><IndividualEnrichDots indId={ind.id} /></td>
-                  <td onClick={e => e.stopPropagation()}>
-                    <button className="btn btn-secondary btn-sm" disabled={enriching[ind.id]} onClick={() => enrich(ind)}>
-                      {enriching[ind.id] ? <Spinner /> : '⚡ Enrich'}
-                    </button>
-                  </td>
+                  <td className="text-xs text-muted">{fmtDate(ind.last_contacted_at)}</td>
                 </tr>
               ))}
             </tbody>

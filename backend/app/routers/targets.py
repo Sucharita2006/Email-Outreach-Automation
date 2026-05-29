@@ -5,9 +5,10 @@ Targets Router — Phase 2: Full Implementation
 - Fuzzy domain search across companies + individuals
 - Domain tag filtering, known/new badge, pagination
 """
-from fastapi import APIRouter, Depends, Query, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, or_, cast, String
+from sqlalchemy.orm import selectinload
 from sqlalchemy.orm import selectinload
 from pydantic import BaseModel, HttpUrl
 from typing import Optional
@@ -71,6 +72,7 @@ class CompanyRead(BaseModel):
     jurisdiction_code: Optional[str]
     company_type: Optional[str]
     source: Optional[str]
+    individuals: list["IndividualRead"] = []
     individual_count: Optional[int] = 0
     created_at: datetime
 
@@ -146,14 +148,17 @@ class DiscoverRequest(BaseModel):
 class DiscoveredCompany(BaseModel):
     id: str
     name: str
-    sector: Optional[str]
-    product_type: Optional[str]
-    description: Optional[str]
-    website: Optional[str]
-    domain_tags: list[str]
-    known: bool
-    relevance_reason: Optional[str]
-    match_source: str
+    sector: Optional[str] = None
+    product_type: Optional[str] = None
+    description: Optional[str] = None
+    website: Optional[str] = None
+    domain_tags: list[str] = []
+    known: bool = False
+    relevance_reason: Optional[str] = None
+    match_source: str = "unknown"
+    best_contact_id: Optional[str] = None
+    best_contact_name: Optional[str] = None
+    best_contact_role: Optional[str] = None
 
 
 class DiscoveredIndividual(BaseModel):
@@ -184,20 +189,20 @@ class DiscoverResponse(BaseModel):
 @router.post("/discover", response_model=DiscoverResponse)
 async def discover_targets(
     body: DiscoverRequest,
-    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Domain-driven auto-discovery pipeline:
+    Domain-driven auto-discovery pipeline (fully synchronous):
     1. Create campaign record
     2. DB fuzzy search — find existing companies + individuals by domain
     3. Serper web search — discover new companies not in DB
     4. Hunter — find decision-maker contacts at matched companies
-    5. Save all new records to DB
-    6. Queue background enrichment (Hunter + OpenCorporates + Serper + Humantic)
-    7. Return full discovered list for user selection
+    5. Verify company websites + retry Hunter with corrected URLs
+    6. Serper individual discovery — find influential people
+    7. Return full discovered list with contacts for user selection
 
-    The user then selects from the returned list and triggers bulk email generation.
+    All steps complete before the response is returned so the UI
+    shows the final data with contacts populated.
     """
     # ── Create campaign ───────────────────────────────────────
     campaign = OutreachCampaign(
@@ -210,23 +215,14 @@ async def discover_targets(
     await db.refresh(campaign)
     await db.commit()
 
-    # ── Run discovery ─────────────────────────────────────────
+    # ── Run discovery (all steps synchronous) ─────────────────
     results = await discovery_service.discover_targets(
         domain=body.domain,
         campaign_purpose=body.campaign_purpose,
         db=db,
         limit=body.limit,
+        campaign_id=str(campaign.id)
     )
-
-    # ── Queue background enrichment for new records ───────────
-    new_company_ids = results.get("new_company_ids", [])
-    new_individual_ids = results.get("new_individual_ids", [])
-    if new_company_ids or new_individual_ids:
-        background_tasks.add_task(
-            discovery_service.enrich_discovered_targets,
-            new_company_ids,
-            new_individual_ids,
-        )
 
     return DiscoverResponse(
         campaign_id=str(campaign.id),
@@ -237,7 +233,7 @@ async def discover_targets(
         individuals=[DiscoveredIndividual(**i) for i in results["individuals"]],
         total_companies=results["total_companies"],
         total_individuals=results["total_individuals"],
-        enrichment_queued=bool(new_company_ids or new_individual_ids),
+        enrichment_queued=False,
     )
 
 
@@ -333,21 +329,30 @@ async def search_targets(
 @router.get("/companies", response_model=list[CompanyRead])
 async def list_companies(
     domain_tag: Optional[str] = Query(None, description="Filter by exact domain tag"),
+    campaign_id: Optional[str] = Query(None, description="Filter by campaign ID"),
     known: Optional[bool] = Query(None, description="Filter by known status"),
     search: Optional[str] = Query(None, description="Name contains search"),
+    website: Optional[str] = Query(None, description="Website contains search"),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
 ):
     """List all companies with optional filters."""
-    stmt = select(Company)
+    stmt = select(Company).options(selectinload(Company.individuals))
 
     if domain_tag:
         stmt = stmt.where(cast(Company.domain_tags, String).contains(domain_tag))
+    if campaign_id:
+        stmt = stmt.where(cast(Company.campaign_ids, String).contains(campaign_id))
     if known is not None:
         stmt = stmt.where(Company.known == known)
     if search:
         stmt = stmt.where(Company.name.ilike(f"%{search}%"))
+    if website:
+        stmt = stmt.where(Company.website.ilike(f"%{website}%"))
+
+    # Hide placeholder companies created for standalone individuals
+    stmt = stmt.where(~Company.name.like("%(Individual)"))
 
     stmt = stmt.order_by(Company.known.asc(), Company.name.asc()).offset(skip).limit(limit)
     result = await db.execute(stmt)
@@ -427,6 +432,7 @@ async def mark_company_known(company_id: str, db: AsyncSession = Depends(get_db)
 async def list_individuals(
     company_id: Optional[str] = Query(None, description="Filter by company ID"),
     domain_tag: Optional[str] = Query(None, description="Filter by domain tag"),
+    campaign_id: Optional[str] = Query(None, description="Filter by campaign ID"),
     known: Optional[bool] = Query(None, description="Filter by known status"),
     search: Optional[str] = Query(None, description="Name or email contains search"),
     skip: int = Query(0, ge=0),
@@ -440,6 +446,8 @@ async def list_individuals(
         stmt = stmt.where(Individual.company_id == company_id)
     if domain_tag:
         stmt = stmt.where(cast(Individual.domain_tags, String).contains(domain_tag))
+    if campaign_id:
+        stmt = stmt.where(cast(Individual.campaign_ids, String).contains(campaign_id))
     if known is not None:
         stmt = stmt.where(Individual.known == known)
     if search:

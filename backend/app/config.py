@@ -27,9 +27,9 @@ class Settings(BaseSettings):
     # ── OpenRouter ────────────────────────────────────────────
     OPENROUTER_API_KEY: str = ""
     OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
-    OPENROUTER_PRIMARY_MODEL: str = "google/gemma-4-31b-it:free"
-    OPENROUTER_FALLBACK_MODEL: str = "google/gemma-4-26b-a4b-it:free"
-    OPENROUTER_BATCH_MODEL: str = "google/gemma-4-31b-it:free"
+    OPENROUTER_PRIMARY_MODEL: str = "anthropic/claude-3.5-sonnet"
+    OPENROUTER_FALLBACK_MODEL: str = "meta-llama/llama-3.1-70b-instruct"
+    OPENROUTER_BATCH_MODEL: str = "anthropic/claude-3.5-haiku"
 
     # ── Hunter.io ─────────────────────────────────────────────
     HUNTER_API_KEY: str = ""

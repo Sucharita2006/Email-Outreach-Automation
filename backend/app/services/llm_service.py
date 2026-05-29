@@ -82,28 +82,11 @@ async def call_llm(
         return {"status": "no_api_key", "content": "", "model": "", "usage": {}, "error": "OPENROUTER_API_KEY not set"}
 
     # ── Model chain ───────────────────────────────────────────
-    # Each provider has independent rate limits. We randomize the first choice
-    # across different providers so a burst of 30 concurrent requests spreads out.
-    import random
-    
-    _FREE_MODELS = [
-        settings.OPENROUTER_PRIMARY_MODEL,          # google/gemma-4-31b-it:free
-        settings.OPENROUTER_FALLBACK_MODEL,         # google/gemma-4-26b-a4b-it:free
-        "nvidia/nemotron-3-super-120b-a12b:free",   # NVIDIA pool
-        "qwen/qwen3-next-80b-a3b-instruct:free",    # Alibaba/Venice pool
-        "minimax/minimax-m2.5:free",                # MiniMax pool
-        "liquid/lfm-2.5-1.2b-instruct:free",        # Liquid pool
-        "nvidia/nemotron-nano-9b-v2:free",          # NVIDIA pool (smaller, faster)
+    _MODEL_CHAIN = [
+        settings.OPENROUTER_PRIMARY_MODEL,
+        settings.OPENROUTER_FALLBACK_MODEL,
     ]
-
-    # If first attempt and no specific model requested, pick a random provider
-    if _chain_index == 0 and not model:
-        selected_model = random.choice(_FREE_MODELS)
-        # Put the randomly selected model at the start of the chain
-        _MODEL_CHAIN = [selected_model] + [m for m in _FREE_MODELS if m != selected_model]
-    else:
-        _MODEL_CHAIN = _FREE_MODELS
-        selected_model = model or _MODEL_CHAIN[min(_chain_index, len(_MODEL_CHAIN) - 1)]
+    selected_model = model or _MODEL_CHAIN[min(_chain_index, len(_MODEL_CHAIN) - 1)]
 
     messages = []
     if system_prompt:

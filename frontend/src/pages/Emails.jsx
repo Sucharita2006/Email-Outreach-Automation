@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, Fragment } from 'react';
 import api from '../api';
 import { useToast, StatusBadge, Spinner, EmptyState, Modal, CopyButton, ConfirmButton, useApi, fmtDate, fmtRelative, truncate } from '../components';
 
@@ -12,7 +12,20 @@ export function Generate() {
   const [campName, setCampName] = useState('');
   const [domain, setDomain] = useState('');
   const [purpose, setPurpose] = useState('');
+  
+  const { data: campaigns } = useApi(() => api.getCampaigns());
+  const PREDEFINED_DOMAINS = [
+    'animal welfare', 'veganism', 'plant-based', 'fermentation', 
+    'cellular agriculture', 'alternative proteins', 'factory farming', 'animal rights'
+  ];
+  const allDomains = [...PREDEFINED_DOMAINS, ...(campaigns || []).map(c => c.domain_target)].filter(Boolean);
+  const uniqueDomains = Object.values(allDomains.reduce((acc, d) => {
+    const key = d.toLowerCase().replace(/[- ]/g, '');
+    if (!acc[key]) acc[key] = d;
+    return acc;
+  }, {}));
   const [discovering, setDiscovering] = useState(false);
+  const [discoverProgress, setDiscoverProgress] = useState(0);
 
   // Step 2 — Target Selection
   const [campaignId, setCampaignId] = useState(null);
@@ -26,6 +39,42 @@ export function Generate() {
 
   // Step 4 — Review
   const [step, setStep] = useState(1);
+  const [selectedResultIds, setSelectedResultIds] = useState(new Set());
+  const [pushingBulk, setPushingBulk] = useState(false);
+  
+  const validResults = genResults.filter(r => r.status === 'ok' && !r._deleted);
+  const allResultsSelected = validResults.length > 0 && validResults.every(r => selectedResultIds.has(r.email_id));
+    
+  const toggleAllResultIds = () => {
+    if (allResultsSelected) setSelectedResultIds(new Set());
+    else setSelectedResultIds(new Set(validResults.map(r => r.email_id)));
+  };
+
+  const toggleResultId = (id) => {
+    setSelectedResultIds(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+  
+  const handleBulkPush = async () => {
+    if (selectedResultIds.size === 0) return;
+    setPushingBulk(true);
+    let successCount = 0;
+    try {
+      for (const id of selectedResultIds) {
+        const res = await api.pushToGmail(id);
+        if (res.status === 'ok') successCount++;
+      }
+      toast(`Successfully pushed ${successCount} emails to Gmail!`, 'success');
+      setSelectedResultIds(new Set());
+    } catch (e) {
+      toast(`Bulk push failed: ${e.message}`, 'error');
+    } finally {
+      setPushingBulk(false);
+    }
+  };
 
   // ── Step 1: Discover ──────────────────────────────────────
   const discover = async () => {
@@ -34,6 +83,15 @@ export function Generate() {
       return;
     }
     setDiscovering(true);
+    setDiscoverProgress(0);
+
+    const interval = setInterval(() => {
+      setDiscoverProgress(p => {
+        if (p >= 95) return p;
+        return p + Math.random() * 5 + 1;
+      });
+    }, 1000);
+
     try {
       const res = await api.discoverTargets({
         campaign_name: campName.trim(),
@@ -41,17 +99,22 @@ export function Generate() {
         campaign_purpose: purpose.trim(),
         limit: 30,
       });
-      setCampaignId(res.campaign_id);
-      setDiscovered(res);
-      setSelectedCompanyIds(new Set());
-      setSelectedIndividualIds(new Set());
-      setStep(2);
-      if (res.enrichment_queued) {
-        toast('Targets found. Enrichment running in background.', 'info');
-      }
+      clearInterval(interval);
+      setDiscoverProgress(100);
+      
+      setTimeout(() => {
+        setCampaignId(res.campaign_id);
+        setDiscovered(res);
+        setSelectedCompanyIds(new Set());
+        setSelectedIndividualIds(new Set());
+        setStep(2);
+        toast(`Found ${res.total_companies} companies and ${res.total_individuals} individuals.`, 'success');
+        setDiscovering(false);
+      }, 500);
     } catch (e) {
+      clearInterval(interval);
+      setDiscoverProgress(0);
       toast(`Discovery failed: ${e.message}`, 'error');
-    } finally {
       setDiscovering(false);
     }
   };
@@ -102,38 +165,50 @@ export function Generate() {
     const companiesByid = Object.fromEntries((discovered?.companies || []).map(c => [c.id, c]));
     const individualsById = Object.fromEntries((discovered?.individuals || []).map(i => [i.id, i]));
 
-    // Selected individuals — auto-pair with their registered company
+    // Selected individuals — pair with their company if available, otherwise standalone
     for (const indId of selectedIndividualIds) {
       const ind = individualsById[indId];
-      if (ind?.company_id) {
-        targets.push({ individual_id: indId, company_id: ind.company_id });
-      }
+      if (!ind) continue;
+      targets.push({
+        individual_id: indId,
+        company_id: ind.company_id || null,
+      });
     }
 
-    // Selected companies without a paired individual — skip (need individual for email)
-    // But if company is selected AND has individuals in the result, use them
+    // Selected companies — use their best contact if available, otherwise send to company directly
     for (const compId of selectedCompanyIds) {
-      const compIndividuals = (discovered?.individuals || []).filter(i => i.company_id === compId);
-      for (const ind of compIndividuals) {
-        if (!selectedIndividualIds.has(ind.id)) { // avoid duplicates
-          targets.push({ individual_id: ind.id, company_id: compId });
+      const comp = companiesByid[compId];
+      if (!comp) continue;
+      if (comp.best_contact_id) {
+        // avoid duplicates if somehow already added
+        if (!targets.find(t => t.company_id === compId && t.individual_id === comp.best_contact_id)) {
+          targets.push({ individual_id: comp.best_contact_id, company_id: compId });
+        }
+      } else {
+        // No specific contact — send to company directly
+        if (!targets.find(t => t.company_id === compId)) {
+          targets.push({ individual_id: null, company_id: compId });
         }
       }
     }
 
     if (targets.length === 0) {
-      toast('No valid individual+company pairs found. Select individuals to generate emails.', 'error');
+      toast('No valid targets found. Make sure selected targets have a valid contact person.', 'error');
       return;
     }
 
     // Init progress rows
-    setGenResults(targets.map(t => ({
-      individual_id: t.individual_id,
-      company_id: t.company_id,
-      individual_name: individualsById[t.individual_id]?.name || '…',
-      company_name: companiesByid[t.company_id]?.name || '…',
-      status: 'pending',
-    })));
+    setGenResults(targets.map(t => {
+      const comp = companiesByid[t.company_id];
+      const indName = individualsById[t.individual_id]?.name || (comp?.best_contact_id === t.individual_id ? comp?.best_contact_name : '…');
+      return {
+        individual_id: t.individual_id,
+        company_id: t.company_id,
+        individual_name: indName,
+        company_name: comp?.name || '…',
+        status: 'pending',
+      };
+    }));
     setGenerating(true);
     setStep(3);
 
@@ -195,12 +270,12 @@ export function Generate() {
       {/* Step indicators */}
       <div className="pipeline" style={{ marginBottom: 28 }}>
         {['Campaign Setup', 'Select Targets', 'Generating', 'Review'].map((s, i) => (
-          <span key={s}>
+          <Fragment key={s}>
             <div className={`pipeline-step ${step === i+1 ? 'active' : step > i+1 ? 'done' : ''}`}>
               {step > i+1 ? '✓' : i+1} {s}
             </div>
             {i < 3 && <div className="pipeline-arrow">→</div>}
-          </span>
+          </Fragment>
         ))}
       </div>
 
@@ -218,7 +293,13 @@ export function Generate() {
           <div className="form-group">
             <label className="form-label">Domain</label>
             <input className="form-input" placeholder="e.g. plant-based, fermentation, animal-welfare"
+              list="domain-suggestions"
               value={domain} onChange={e => setDomain(e.target.value)} />
+            <datalist id="domain-suggestions">
+              {domain.trim().length > 0 && uniqueDomains
+                .filter(d => d.toLowerCase().startsWith(domain.trim().toLowerCase()))
+                .map(d => <option key={d} value={d} />)}
+            </datalist>
             <div className="text-xs text-muted" style={{ marginTop: 4 }}>
               Used to discover matching companies and individuals automatically.
             </div>
@@ -237,8 +318,14 @@ export function Generate() {
           <button className="btn btn-primary btn-lg w-full"
             disabled={!campName.trim() || !domain.trim() || !purpose.trim() || discovering}
             onClick={discover}>
-            {discovering ? <><Spinner /> Discovering targets…</> : '🔍 Discover Targets'}
+            {discovering ? <><Spinner /> Discovering &amp; finding contacts…</> : '🔍 Discover Targets'}
           </button>
+
+          {discovering && (
+            <div style={{ width: '100%', height: 6, background: 'var(--bg-glass)', marginTop: 16, borderRadius: 3, overflow: 'hidden' }}>
+              <div style={{ width: `${discoverProgress}%`, height: '100%', background: 'var(--accent-1)', transition: 'width 0.5s ease-out' }} />
+            </div>
+          )}
         </div>
       )}
 
@@ -257,11 +344,9 @@ export function Generate() {
               <strong>{discovered.total_individuals}</strong> individuals found for
               <strong> "{discovered.domain}"</strong>
             </span>
-            {discovered.enrichment_queued && (
-              <span className="text-xs text-muted" style={{ marginLeft: 'auto' }}>
-                ⏳ Enrichment running in background…
-              </span>
-            )}
+            <span className="text-xs" style={{ marginLeft: 'auto', color: 'var(--status-replied)' }}>
+              ✓ Discovery complete
+            </span>
           </div>
 
           <div className="grid-2" style={{ alignItems: 'start' }}>
@@ -310,6 +395,15 @@ export function Generate() {
                         {c.relevance_reason && (
                           <div className="text-xs text-secondary" style={{ marginTop: 4, lineHeight: 1.4 }}>
                             {c.relevance_reason.slice(0, 100)}{c.relevance_reason.length > 100 ? '…' : ''}
+                          </div>
+                        )}
+                        {c.best_contact_name ? (
+                          <div className="text-xs" style={{ marginTop: 6, color: 'var(--accent-1)', fontWeight: 500 }}>
+                            ↳ Contact: {c.best_contact_name} {c.best_contact_role && `— ${c.best_contact_role}`}
+                          </div>
+                        ) : (
+                          <div className="text-xs" style={{ marginTop: 6, color: '#ef4444', fontStyle: 'italic' }}>
+                            ↳ Contact: Email not found
                           </div>
                         )}
                       </div>
@@ -362,7 +456,11 @@ export function Generate() {
                         <div className="text-xs text-muted">
                           {i.role || 'Unknown role'}{i.company_name ? ` @ ${i.company_name}` : ''}
                         </div>
-                        {i.email && <div className="text-xs font-mono text-muted" style={{ marginTop: 2 }}>{i.email}</div>}
+                        {i.email ? (
+                          <div className="text-xs font-mono text-muted" style={{ marginTop: 2 }}>{i.email}</div>
+                        ) : (
+                          <div className="text-xs" style={{ marginTop: 2, color: '#ef4444' }}>Email not found</div>
+                        )}
                         {i.relevance_reason && (
                           <div className="text-xs text-secondary" style={{ marginTop: 4, lineHeight: 1.4 }}>
                             {i.relevance_reason.slice(0, 100)}{i.relevance_reason.length > 100 ? '…' : ''}
@@ -431,7 +529,7 @@ export function Generate() {
           <div className="flex justify-between items-center">
             <div>
               <span style={{ fontWeight: 700, fontSize: '1.1rem' }}>
-                {genResults.filter(r => r.status === 'ok').length} / {genResults.length} emails generated
+                {validResults.length} / {genResults.filter(r => !r._deleted).length} emails generated
               </span>
               <span className="text-sm text-muted" style={{ marginLeft: 12 }}>
                 Campaign: <strong>{campName}</strong>
@@ -442,57 +540,235 @@ export function Generate() {
               <button className="btn btn-secondary btn-sm" onClick={reset}>+ New Campaign</button>
             </div>
           </div>
+          
+          {validResults.length > 0 && (
+            <div style={{ 
+              display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', 
+              background: 'var(--bg-glass)', borderRadius: 'var(--radius-sm)',
+              position: 'sticky', top: 16, zIndex: 10, backdropFilter: 'blur(8px)',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
+            }}>
+              <input type="checkbox" checked={allResultsSelected} onChange={toggleAllResultIds} style={{ cursor: 'pointer' }} id="select-all-results" />
+              <label htmlFor="select-all-results" className="text-sm" style={{ fontWeight: 600, cursor: 'pointer', margin: 0 }}>
+                Select All ({validResults.length})
+              </label>
+              
+              <button 
+                className="btn btn-primary btn-sm" 
+                style={{ marginLeft: 'auto' }}
+                disabled={selectedResultIds.size === 0 || pushingBulk}
+                onClick={handleBulkPush}
+              >
+                {pushingBulk ? <Spinner /> : '📤'} Push {selectedResultIds.size > 0 ? selectedResultIds.size : ''} Selected to Gmail
+              </button>
+            </div>
+          )}
 
           {genResults.map((r, idx) => (
-            <div key={idx} className="card">
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
-                <span style={{
-                  width: 28, height: 28, borderRadius: '50%', display: 'flex',
-                  alignItems: 'center', justifyContent: 'center', fontSize: '0.85rem', fontWeight: 700,
-                  background: r.status === 'ok' ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)',
-                  color: r.status === 'ok' ? '#22c55e' : '#ef4444',
-                }}>
-                  {r.status === 'ok' ? '✓' : '✗'}
-                </span>
-                <div>
-                  <span style={{ fontWeight: 600 }}>{r.individual_name}</span>
-                  <span className="text-muted text-sm"> · {r.company_name}</span>
-                </div>
-                {r.status === 'ok' && (
-                  <div style={{ marginLeft: 'auto' }}>
-                    <CopyButton
-                      text={`Subject: ${r.subject}\n\n${r.body}`}
-                      label="Copy Email"
-                    />
-                  </div>
-                )}
-              </div>
-
-              {r.status === 'ok' ? (
-                <>
-                  <div style={{
-                    padding: '8px 14px', background: 'var(--bg-glass)',
-                    borderRadius: 'var(--radius-sm)', marginBottom: 12,
-                    fontWeight: 600, fontSize: '0.9rem',
-                    borderLeft: '3px solid var(--accent-1)',
-                  }}>
-                    {r.subject}
-                  </div>
-                  <div className="email-preview" style={{ whiteSpace: 'pre-wrap', lineHeight: 1.7 }}>
-                    {r.body}
-                  </div>
-                </>
-              ) : (
-                <div style={{ color: 'var(--status-ignored)', fontSize: '0.875rem', padding: '10px 14px', background: 'rgba(239,68,68,0.06)', borderRadius: 'var(--radius-sm)' }}>
-                  ⚠️ {r.error || 'Generation failed'}
-                </div>
-              )}
-            </div>
+            !r._deleted && (
+              <EmailResultCard
+                key={r.email_id || idx}
+                result={r}
+                idx={idx}
+                selected={selectedResultIds.has(r.email_id)}
+                onToggle={() => toggleResultId(r.email_id)}
+                onDeleted={() => {
+                  setGenResults(prev => prev.map((p, i) => i === idx ? { ...p, _deleted: true } : p));
+                  toast('Email deleted.', 'success');
+                }}
+                onRegenerated={(newResult) => {
+                  setGenResults(prev => prev.map((p, i) => i === idx ? { ...newResult, individual_name: p.individual_name, company_name: p.company_name } : p));
+                  toast('Email regenerated!', 'success');
+                }}
+              />
+            )
           ))}
 
           <div style={{ textAlign: 'center', paddingBottom: 20 }}>
             <a href="#drafts" className="btn btn-secondary btn-sm">View All Drafts →</a>
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════
+//  EmailResultCard — Individual email card with Save/Delete/Regenerate
+// ════════════════════════════════════════════════════════════
+function EmailResultCard({ result: r, idx, onDeleted, onRegenerated, selected, onToggle }) {
+  const toast = useToast();
+  const [deleting, setDeleting] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
+  const [showRegenInput, setShowRegenInput] = useState(false);
+  const [regenFeedback, setRegenFeedback] = useState('');
+
+  const handleDelete = async () => {
+    if (!r.email_id) return;
+    setDeleting(true);
+    try {
+      await api.deleteEmail(r.email_id);
+      onDeleted();
+    } catch (e) {
+      toast(`Delete failed: ${e.message}`, 'error');
+      setDeleting(false);
+    }
+  };
+
+  const handleRegenerate = async () => {
+    if (!r.email_id || !regenFeedback.trim()) {
+      toast('Please describe what changes you want.', 'error');
+      return;
+    }
+    setRegenerating(true);
+    try {
+      const res = await api.regenerateEmail(r.email_id, regenFeedback.trim());
+      setShowRegenInput(false);
+      setRegenFeedback('');
+      onRegenerated(res);
+    } catch (e) {
+      toast(`Regenerate failed: ${e.message}`, 'error');
+    } finally {
+      setRegenerating(false);
+    }
+  };
+
+  return (
+    <div className="card" style={{
+      transition: 'all 0.3s ease',
+      opacity: deleting ? 0.4 : 1,
+      background: selected ? 'var(--bg-glass)' : 'var(--bg-card)',
+    }}>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+        {r.status === 'ok' && (
+          <input type="checkbox" checked={selected} onChange={onToggle} style={{ cursor: 'pointer', marginTop: 2 }} />
+        )}
+        <span style={{
+          width: 28, height: 28, borderRadius: '50%', display: 'flex',
+          alignItems: 'center', justifyContent: 'center', fontSize: '0.85rem', fontWeight: 700,
+          background: r.status === 'ok' ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)',
+          color: r.status === 'ok' ? '#22c55e' : '#ef4444',
+        }}>
+          {r.status === 'ok' ? '✓' : '✗'}
+        </span>
+        <div>
+          <div style={{ fontWeight: 600 }}>
+            {r.individual_name || r.recipient_name}
+            <span className="text-muted text-sm" style={{ fontWeight: 400 }}> · {r.company_name}</span>
+          </div>
+          {r.recipient_email && (
+            <div className="text-muted text-sm" style={{ marginTop: 4 }}>
+              ✉️ {r.recipient_email}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Email Content */}
+      {r.status === 'ok' ? (
+        <>
+          <div style={{
+            padding: '8px 14px', background: 'var(--bg-glass)',
+            borderRadius: 'var(--radius-sm)', marginBottom: 12,
+            fontWeight: 600, fontSize: '0.9rem',
+            borderLeft: '3px solid var(--accent-1)',
+          }}>
+            {r.subject}
+          </div>
+          <div className="email-preview" style={{ whiteSpace: 'pre-wrap', lineHeight: 1.7 }}>
+            {r.body}
+          </div>
+
+          {/* ── Action Buttons ── */}
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 10,
+            marginTop: 16, paddingTop: 14,
+            borderTop: '1px solid var(--border)',
+          }}>
+            <button
+              className="btn btn-sm"
+              style={{
+                background: 'rgba(239,68,68,0.08)',
+                color: '#ef4444', border: '1px solid rgba(239,68,68,0.25)',
+              }}
+              disabled={deleting}
+              onClick={handleDelete}
+            >
+              {deleting ? <Spinner /> : '🗑️ Delete'}
+            </button>
+
+            <button
+              className="btn btn-sm"
+              style={{
+                background: showRegenInput ? 'rgba(59,130,246,0.15)' : 'rgba(59,130,246,0.08)',
+                color: '#3b82f6', border: '1px solid rgba(59,130,246,0.25)',
+              }}
+              disabled={regenerating}
+              onClick={() => setShowRegenInput(!showRegenInput)}
+            >
+              🔄 Regenerate
+            </button>
+
+            <div style={{ marginLeft: 'auto' }}>
+              <CopyButton
+                text={`Subject: ${r.subject}\n\n${r.body}`}
+                label="Copy Full Email"
+              />
+            </div>
+          </div>
+
+          {/* ── Regenerate Feedback Input ── */}
+          {showRegenInput && (
+            <div style={{
+              marginTop: 12, padding: 16,
+              background: 'rgba(59,130,246,0.04)',
+              borderRadius: 'var(--radius-sm)',
+              border: '1px solid rgba(59,130,246,0.15)',
+              animation: 'fadeIn 0.2s ease-out',
+            }}>
+              <label style={{ display: 'block', fontWeight: 600, fontSize: '0.85rem', marginBottom: 8, color: '#3b82f6' }}>
+                What changes would you like?
+              </label>
+              <textarea
+                value={regenFeedback}
+                onChange={e => setRegenFeedback(e.target.value)}
+                placeholder="e.g. Make the tone more casual, shorten the email, focus more on sustainability partnerships..."
+                rows={3}
+                style={{
+                  width: '100%', padding: '10px 12px',
+                  background: 'var(--bg-card)', color: 'var(--text-primary)',
+                  border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
+                  resize: 'vertical', fontFamily: 'inherit', fontSize: '0.875rem',
+                  lineHeight: 1.5,
+                }}
+              />
+              <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                <button
+                  className="btn btn-sm"
+                  style={{
+                    background: 'linear-gradient(135deg, #3b82f6, #6366f1)',
+                    color: '#fff', border: 'none', fontWeight: 600,
+                  }}
+                  disabled={regenerating || !regenFeedback.trim()}
+                  onClick={handleRegenerate}
+                >
+                  {regenerating ? <><Spinner /> Regenerating...</> : '🔄 Regenerate with Changes'}
+                </button>
+                <button
+                  className="btn btn-sm btn-secondary"
+                  onClick={() => { setShowRegenInput(false); setRegenFeedback(''); }}
+                  disabled={regenerating}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+        </>
+      ) : (
+        <div style={{ color: 'var(--status-ignored)', fontSize: '0.875rem', padding: '10px 14px', background: 'rgba(239,68,68,0.06)', borderRadius: 'var(--radius-sm)' }}>
+          ⚠️ {r.error || 'Generation failed'}
         </div>
       )}
     </div>
@@ -525,22 +801,88 @@ function PushToGmailButton({ emailId }) {
 // ════════════════════════════════════════════════════════════
 //  Email Drafts Page
 // ════════════════════════════════════════════════════════════
-export function Drafts() {
+export function Campaigns({ campaignId, navigate }) {
+  if (campaignId) {
+    return <CampaignDetail campaignId={campaignId} onBack={() => navigate('campaigns')} />;
+  }
+  return <CampaignList onSelect={(id) => navigate('campaigns', { campaignId: id })} />;
+}
+
+function CampaignList({ onSelect }) {
+  const { data: campaigns, loading } = useApi(() => api.getCampaigns());
+
+  if (loading) return <div className="loading-overlay"><Spinner size="lg" /></div>;
+
+  return (
+    <div>
+      <div className="page-header">
+        <div>
+          <h1 className="page-title">🗂️ Campaigns</h1>
+          <p className="page-subtitle">Manage your outreach campaigns</p>
+        </div>
+      </div>
+      {!campaigns?.length ? (
+        <EmptyState icon="📋" title="No campaigns yet" text="Create a campaign from the Generate page." />
+      ) : (
+        <div className="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Domain</th>
+                <th>Status</th>
+                <th>Created</th>
+              </tr>
+            </thead>
+            <tbody>
+              {campaigns.map(c => (
+                <tr key={c.id} onClick={() => onSelect(c.id)} style={{ cursor: 'pointer' }}>
+                  <td style={{ fontWeight: 600 }}>{c.name}</td>
+                  <td>{c.domain_target}</td>
+                  <td><StatusBadge status={c.status} /></td>
+                  <td className="text-sm text-muted">{fmtDate(c.created_at)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CampaignDetail({ campaignId, onBack }) {
   const toast = useToast();
-  const [selected, setSelected] = useState(null);
+  const [tab, setTab] = useState('targets'); // 'targets' | 'emails'
   const [statusFilter, setStatusFilter] = useState('');
+  
+  // Modals for emails
+  const [selectedEmail, setSelectedEmail] = useState(null);
   const [editMode, setEditMode] = useState(false);
   const [editSubject, setEditSubject] = useState('');
   const [editBody, setEditBody] = useState('');
   const [saving, setSaving] = useState(false);
 
-  const { data: emails, loading, reload } = useApi(
-    () => api.getEmails(statusFilter ? { status: statusFilter, limit: 100 } : { limit: 100 }),
-    [statusFilter]
+  // Selection & Generation for Targets tab
+  const [selectedCompanyIds, setSelectedCompanyIds] = useState(new Set());
+  const [selectedIndividualIds, setSelectedIndividualIds] = useState(new Set());
+  const [generating, setGenerating] = useState(false);
+  // Fetch data
+  const { data: campaign, loading: campLoading } = useApi(async () => {
+    const list = await api.getCampaigns();
+    return list.find(c => c.id === campaignId);
+  }, [campaignId]);
+
+  const { data: companies, loading: compLoading } = useApi(() => api.getCompanies({ campaign_id: campaignId, limit: 100 }), [campaignId]);
+  const { data: individuals, loading: indLoading } = useApi(() => api.getIndividuals({ campaign_id: campaignId, limit: 100 }), [campaignId]);
+  
+  const { data: emails, loading: emailsLoading, reload: reloadEmails } = useApi(
+    () => api.getEmails({ campaign_id: campaignId, status: statusFilter || undefined, limit: 100 }),
+    [campaignId, statusFilter]
   );
 
   const openDetail = (email) => {
-    setSelected(email);
+    setSelectedEmail(email);
     setEditMode(false);
     setEditSubject(email.subject || '');
     setEditBody(email.body || '');
@@ -549,11 +891,11 @@ export function Drafts() {
   const save = async () => {
     setSaving(true);
     try {
-      const updated = await api.updateEmail(selected.id, { subject: editSubject, body: editBody });
-      setSelected(updated);
+      const updated = await api.updateEmail(selectedEmail.id, { subject: editSubject, body: editBody });
+      setSelectedEmail(updated);
       setEditMode(false);
       toast('Email updated', 'success');
-      reload();
+      reloadEmails();
     } catch (e) { toast(e.message, 'error'); }
     finally { setSaving(false); }
   };
@@ -562,8 +904,8 @@ export function Drafts() {
     try {
       await api.approveEmail(id);
       toast('Email approved ✅', 'success');
-      setSelected(null);
-      reload();
+      setSelectedEmail(null);
+      reloadEmails();
     } catch (e) { toast(e.message, 'error'); }
   };
 
@@ -571,83 +913,253 @@ export function Drafts() {
     try {
       await api.regenerateEmail(id);
       toast('Regenerating draft…', 'info');
-      setSelected(null);
-      reload();
+      setSelectedEmail(null);
+      reloadEmails();
     } catch (e) { toast(e.message, 'error'); }
   };
+
+  const generateSelected = async () => {
+    const targets = [];
+    const companiesByid = Object.fromEntries((companies||[]).map(c => [c.id, c]));
+    
+    for (const indId of selectedIndividualIds) {
+      const ind = individuals?.find(i => i.id === indId);
+      if (ind) targets.push({ individual_id: ind.id, company_id: ind.company_id });
+    }
+    
+    for (const compId of selectedCompanyIds) {
+      const comp = companiesByid[compId];
+      if (!comp) continue;
+      if (comp.best_contact_id) {
+        if (!targets.find(t => t.company_id === compId && t.individual_id === comp.best_contact_id)) {
+          targets.push({ individual_id: comp.best_contact_id, company_id: compId });
+        }
+      } else {
+        if (!targets.find(t => t.company_id === compId)) {
+          targets.push({ individual_id: null, company_id: compId });
+        }
+      }
+    }
+
+    if (targets.length === 0) {
+      toast('Please select at least one target.', 'error');
+      return;
+    }
+
+    setGenerating(true);
+    try {
+      const res = await api.generateCampaignTargets({
+        campaign_id: campaignId,
+        targets,
+        force_refresh_analysis: false,
+      });
+      toast(`${res.ok} email(s) generated.`, res.ok > 0 ? 'success' : 'error');
+      setSelectedCompanyIds(new Set());
+      setSelectedIndividualIds(new Set());
+      setTab('emails');
+      reloadEmails();
+    } catch (e) {
+      toast(`Generation failed: ${e.message}`, 'error');
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const selectUndrafted = () => {
+    const draftedIndIds = new Set(emails?.filter(e => e.target_type === 'individual').map(e => e.target_id));
+    const draftedCompIds = new Set(emails?.filter(e => e.target_type === 'company').map(e => e.target_id));
+    
+    // Also mark companies as drafted if their name matches any email's company_name
+    emails?.forEach(e => {
+      if (e.company_name) {
+        const comp = companies?.find(c => c.name === e.company_name);
+        if (comp) draftedCompIds.add(comp.id);
+      }
+    });
+    
+    const newSelInd = new Set();
+    const newSelComp = new Set();
+    
+    individuals?.forEach(i => {
+      if (!draftedIndIds.has(i.id)) newSelInd.add(i.id);
+    });
+    
+    companies?.forEach(c => {
+      if (!draftedCompIds.has(c.id)) newSelComp.add(c.id);
+    });
+    
+    setSelectedIndividualIds(newSelInd);
+    setSelectedCompanyIds(newSelComp);
+  };
+
+
+  if (campLoading) return <div className="loading-overlay"><Spinner size="lg" /></div>;
+  if (!campaign) return <div>Campaign not found.</div>;
 
   return (
     <div>
       <div className="page-header">
         <div>
-          <h1 className="page-title">📬 Email Drafts</h1>
-          <p className="page-subtitle">Review, edit, and approve outreach emails</p>
-        </div>
-        <div className="flex gap-2">
-          <select className="form-select" style={{ width: 'auto' }} value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
-            <option value="">All statuses</option>
-            <option value="DRAFTED">Drafted</option>
-            <option value="SENT">Sent</option>
-            <option value="REPLIED">Replied</option>
-            <option value="IGNORED">Ignored</option>
-            <option value="FOLLOW_UP_SENT">Follow-up Sent</option>
-          </select>
-          <button className="btn btn-secondary btn-sm" onClick={reload}>🔄</button>
+          <button className="btn btn-secondary btn-sm mb-2" onClick={onBack}>← Back to Campaigns</button>
+          <h1 className="page-title">{campaign.name}</h1>
+          <p className="page-subtitle">Domain: {campaign.domain_target} · Status: <StatusBadge status={campaign.status} /></p>
         </div>
       </div>
 
-      {loading ? (
-        <div className="loading-overlay"><Spinner size="lg" /></div>
-      ) : !emails?.length ? (
-        <EmptyState icon="📬" title="No emails yet" text="Generate your first email draft from the Generate page." />
-      ) : (
-        <div className="table-wrapper">
-          <table>
-            <thead>
-              <tr>
-                <th>Recipient</th>
-                <th>Company</th>
-                <th>Subject</th>
-                <th>Status</th>
-                <th>Drafted</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {emails.map(e => (
-                <tr key={e.id} onClick={() => openDetail(e)} style={{ cursor: 'pointer' }}>
-                  <td>
-                    <div style={{ fontWeight: 600 }}>{e.recipient_name || '—'}</div>
-                    <div className="text-xs font-mono text-muted">{e.recipient_email || '—'}</div>
-                  </td>
-                  <td className="text-sm">{e.company_name || '—'}</td>
-                  <td className="text-sm">{truncate(e.subject, 50)}</td>
-                  <td><StatusBadge status={e.status} /></td>
-                  <td className="text-xs text-muted">{fmtRelative(e.drafted_at)}</td>
-                  <td onClick={ev => ev.stopPropagation()}>
-                    <div className="flex gap-1">
-                      {e.status === 'DRAFTED' && (
-                        <button className="btn btn-primary btn-sm" onClick={() => approve(e.id)}>✅ Approve</button>
-                      )}
-                      <button className="btn btn-secondary btn-sm" onClick={() => openDetail(e)}>View</button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      <div style={{ display: 'flex', gap: 10, marginBottom: 20, borderBottom: '1px solid var(--border)', paddingBottom: 10 }}>
+        <button className={`btn ${tab === 'targets' ? 'btn-primary' : 'btn-secondary'} btn-sm`} onClick={() => setTab('targets')}>Targets ({companies?.length + individuals?.length || 0})</button>
+        <button className={`btn ${tab === 'emails' ? 'btn-primary' : 'btn-secondary'} btn-sm`} onClick={() => setTab('emails')}>Emails ({emails?.length || 0})</button>
+      </div>
+
+      {tab === 'targets' && (
+        <>
+          <div style={{ display: 'flex', gap: 10, marginBottom: 16 }}>
+            <button className="btn btn-sm btn-secondary" onClick={selectUndrafted}>
+              ✓ Select Undrafted
+            </button>
+            <button className="btn btn-sm btn-primary" onClick={generateSelected} disabled={generating || (selectedCompanyIds.size === 0 && selectedIndividualIds.size === 0)}>
+              {generating ? <Spinner /> : '⚡'} Generate Emails for Selected
+            </button>
+          </div>
+          <div className="grid-2">
+            <div className="card">
+              <h3 className="card-title mb-4">Companies Discovered</h3>
+              {compLoading ? <Spinner /> : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {companies?.map(c => {
+                    const isDrafted = emails?.some(e => 
+                      (e.target_type === 'company' && e.target_id === c.id) ||
+                      (e.company_name === c.name)
+                    );
+                    const isSelected = selectedCompanyIds.has(c.id);
+                    return (
+                      <div key={c.id} style={{ 
+                        padding: 10, background: isSelected ? 'var(--bg-glass)' : 'var(--bg-card)', 
+                        border: '1px solid', borderColor: isSelected ? 'var(--accent-1)' : 'var(--border)',
+                        borderRadius: 'var(--radius-sm)', display: 'flex', alignItems: 'flex-start', gap: 10
+                      }}>
+                        <input type="checkbox" checked={isSelected} style={{ marginTop: 4, cursor: 'pointer' }}
+                          onChange={(e) => {
+                            const next = new Set(selectedCompanyIds);
+                            e.target.checked ? next.add(c.id) : next.delete(c.id);
+                            setSelectedCompanyIds(next);
+                          }} />
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+                            {c.name}
+                            {isDrafted && <span className="badge" style={{ background: 'rgba(34,197,94,0.15)', color: '#22c55e', fontSize: '0.65rem' }}>Drafted</span>}
+                          </div>
+                          <div className="text-xs text-muted">{c.website}</div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {!companies?.length && <div className="text-sm text-muted">No companies found.</div>}
+                </div>
+              )}
+            </div>
+            <div className="card">
+              <h3 className="card-title mb-4">Individuals Discovered</h3>
+              {indLoading ? <Spinner /> : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {individuals?.map(i => {
+                    const isDrafted = emails?.some(e => e.target_type === 'individual' && e.target_id === i.id);
+                    const isSelected = selectedIndividualIds.has(i.id);
+                    return (
+                      <div key={i.id} style={{ 
+                        padding: 10, background: isSelected ? 'var(--bg-glass)' : 'var(--bg-card)', 
+                        border: '1px solid', borderColor: isSelected ? 'var(--accent-1)' : 'var(--border)',
+                        borderRadius: 'var(--radius-sm)', display: 'flex', alignItems: 'flex-start', gap: 10
+                      }}>
+                        <input type="checkbox" checked={isSelected} style={{ marginTop: 4, cursor: 'pointer' }}
+                          onChange={(e) => {
+                            const next = new Set(selectedIndividualIds);
+                            e.target.checked ? next.add(i.id) : next.delete(i.id);
+                            setSelectedIndividualIds(next);
+                          }} />
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+                            {i.name}
+                            {isDrafted && <span className="badge" style={{ background: 'rgba(34,197,94,0.15)', color: '#22c55e', fontSize: '0.65rem' }}>Drafted</span>}
+                          </div>
+                          <div className="text-xs text-muted">
+                            {i.email ? `✉️ ${i.email}` : <span style={{ color: '#ef4444' }}>Email not found</span>} · {companies?.find(c => c.id === i.company_id)?.name || 'Unknown Company'}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {!individuals?.length && <div className="text-sm text-muted">No individuals found.</div>}
+                </div>
+              )}
+            </div>
+          </div>
+        </>
+      )}
+
+      {tab === 'emails' && (
+        <div>
+          <div className="flex gap-2 mb-4">
+            <select className="form-select" style={{ width: 'auto' }} value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+              <option value="">All statuses</option>
+              <option value="DRAFTED">Drafted</option>
+              <option value="SENT">Sent</option>
+              <option value="REPLIED">Replied</option>
+              <option value="IGNORED">Ignored</option>
+              <option value="FOLLOW_UP_SENT">Follow-up Sent</option>
+            </select>
+            <button className="btn btn-secondary btn-sm" onClick={reloadEmails}>🔄</button>
+          </div>
+          
+          {emailsLoading ? <Spinner /> : !emails?.length ? (
+            <EmptyState icon="📬" title="No emails yet" text="No emails drafted for this campaign." />
+          ) : (
+            <div className="table-wrapper">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Recipient</th>
+                    <th>Company</th>
+                    <th>Subject</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {emails.map(e => (
+                    <tr key={e.id} onClick={() => openDetail(e)} style={{ cursor: 'pointer' }}>
+                      <td>
+                        <div style={{ fontWeight: 600 }}>{e.recipient_name || '—'}</div>
+                        <div className="text-xs font-mono text-muted">{e.recipient_email || '—'}</div>
+                      </td>
+                      <td className="text-sm">{e.company_name || '—'}</td>
+                      <td className="text-sm">{truncate(e.subject, 50)}</td>
+                      <td><StatusBadge status={e.status} /></td>
+                      <td onClick={ev => ev.stopPropagation()}>
+                        <div className="flex gap-1">
+                          {e.status === 'DRAFTED' && (
+                            <button className="btn btn-primary btn-sm" onClick={() => approve(e.id)}>✅ Approve</button>
+                          )}
+                          <button className="btn btn-secondary btn-sm" onClick={() => openDetail(e)}>View</button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 
       {/* Email Detail Modal */}
-      <Modal open={!!selected} onClose={() => setSelected(null)} title="Email Draft" size="xl">
-        {selected && (
+      <Modal open={!!selectedEmail} onClose={() => setSelectedEmail(null)} title="Email Draft" size="xl">
+        {selectedEmail && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <div className="flex justify-between items-center">
               <div className="flex gap-2 items-center">
-                <StatusBadge status={selected.status} />
-                <span className="text-xs text-muted">{fmtDate(selected.drafted_at)}</span>
-                {selected.llm_model_used && <span className="text-xs text-muted">· {selected.llm_model_used.split('/').pop()}</span>}
+                <StatusBadge status={selectedEmail.status} />
+                <span className="text-xs text-muted">{fmtDate(selectedEmail.drafted_at)}</span>
               </div>
               <div className="flex gap-2">
                 {editMode ? (
@@ -657,18 +1169,19 @@ export function Drafts() {
                   </>
                 ) : (
                   <>
-                    {selected.status === 'DRAFTED' && <button className="btn btn-secondary btn-sm" onClick={() => setEditMode(true)}>✏️ Edit</button>}
-                    {selected.status === 'DRAFTED' && <button className="btn btn-primary btn-sm" onClick={() => approve(selected.id)}>✅ Approve</button>}
-                    <button className="btn btn-secondary btn-sm" onClick={() => regenerate(selected.id)}>🔄 Regenerate</button>
-                    <PushToGmailButton emailId={selected.id} />
+                    {selectedEmail.status === 'DRAFTED' && <button className="btn btn-secondary btn-sm" onClick={() => setEditMode(true)}>✏️ Edit</button>}
+                    {selectedEmail.status === 'DRAFTED' && <button className="btn btn-primary btn-sm" onClick={() => approve(selectedEmail.id)}>✅ Approve</button>}
+                    <button className="btn btn-secondary btn-sm" onClick={() => regenerate(selectedEmail.id)}>🔄 Regenerate</button>
+                    <PushToGmailButton emailId={selectedEmail.id} />
                   </>
                 )}
               </div>
             </div>
 
             <div style={{ padding: '10px 14px', background: 'var(--bg-glass)', borderRadius: 'var(--radius-sm)', fontSize: '0.875rem' }}>
-              <strong>To:</strong> {selected.recipient_name} &lt;{selected.recipient_email || 'unknown'}&gt;
-              {selected.company_name && <> · <strong>Re:</strong> {selected.company_name}</>}
+              <div className="text-sm font-mono text-muted mb-1">Fetched Email ID: {selectedEmail.recipient_email || 'unknown'}</div>
+              <strong>To:</strong> {selectedEmail.recipient_name}
+              {selectedEmail.company_name && <> · <strong>Re:</strong> {selectedEmail.company_name}</>}
             </div>
 
             {editMode ? (
@@ -684,9 +1197,9 @@ export function Drafts() {
               </>
             ) : (
               <>
-                <div className="email-subject">{selected.subject || 'No subject'}</div>
-                <div className="email-preview">{selected.body || 'No body'}</div>
-                <CopyButton text={`Subject: ${selected.subject}\n\n${selected.body}`} label="Copy Full Email" />
+                <div className="email-subject">{selectedEmail.subject || 'No subject'}</div>
+                <div className="email-preview">{selectedEmail.body || 'No body'}</div>
+                <CopyButton text={`Subject: ${selectedEmail.subject}\n\n${selectedEmail.body}`} label="Copy Full Email" />
               </>
             )}
           </div>

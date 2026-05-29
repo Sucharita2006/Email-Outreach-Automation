@@ -78,10 +78,18 @@ async def run_individual_analysis(
         serper_signals = individual.serper_individual_cache.get("signals", "Not available")
 
     # Build context object for Jinja2 template
+    # Avoid accessing individual.company (lazy relationship) in async context;
+    # instead use a pre-set _company_name attribute or fall back to company_id lookup.
+    company_name = getattr(individual, '_company_name', None)
+    if not company_name:
+        try:
+            company_name = individual.company.name if individual.company else "Unknown Company"
+        except Exception:
+            company_name = "Unknown Company"
     individual_ctx = {
         "name": individual.name,
         "role": individual.role or "Professional",
-        "company": individual.company.name if individual.company else "Unknown Company",
+        "company": company_name,
         "linkedin_signals": individual.linkedin_url or "Not available",
         "disc_type": disc_type,
         "communication_pref": comm_pref,
@@ -505,30 +513,80 @@ async def batch_generate_emails(
     force_refresh_analysis: bool = False,
 ) -> list[dict]:
     """
-    Generate emails for multiple targets concurrently.
-    Creates a new DB session per task to avoid SQLAlchemy concurrency errors.
+    Generate emails for multiple targets.
+    Processes sequentially to avoid SQLite 'database is locked' errors.
+    Each target gets its own DB session for isolation.
     """
     from app.database.session import AsyncSessionLocal
-    
-    max_concurrent = concurrency or settings.LLM_BATCH_CONCURRENCY
-    semaphore = asyncio.Semaphore(max_concurrent)
 
-    async def _generate_one(pair: dict) -> dict:
-        ind_id = pair["individual_id"]
-        comp_id = pair["company_id"]
-        
-        async with semaphore:
+    results = []
+
+    for pair in target_pairs:
+        ind_id = pair.get("individual_id")
+        comp_id = pair.get("company_id")
+
+        try:
             async with AsyncSessionLocal() as task_db:
-                # Reload models within the thread-safe session
-                individual = await task_db.get(Individual, ind_id)
-                company = await task_db.get(Company, comp_id)
+                individual = None
+                company = None
+
+                # Load company
+                if comp_id:
+                    company = await task_db.get(Company, comp_id)
+                    if not company:
+                        results.append({"status": "error", "company_id": comp_id, "error": "Company not found"})
+                        continue
+
+                # Load individual
+                if ind_id:
+                    individual = await task_db.get(Individual, ind_id)
+                    if not individual:
+                        results.append({"status": "error", "individual_id": ind_id, "error": "Individual not found"})
+                        continue
+                elif company:
+                    # No individual specified — find best contact for company from DB
+                    from sqlalchemy import select as sel
+                    stmt = sel(Individual).where(Individual.company_id == company.id).limit(10)
+                    result = await task_db.execute(stmt)
+                    contacts = result.scalars().all()
+                    if contacts:
+                        def _role_score(role):
+                            if not role: return 0
+                            r = role.lower()
+                            if any(x in r for x in ["ceo","chief executive","founder","president","owner"]): return 100
+                            if any(x in r for x in ["cmo","cto","coo","cfo","chief"]): return 90
+                            if any(x in r for x in ["vp","vice president","partner"]): return 80
+                            if any(x in r for x in ["director","head"]): return 70
+                            if any(x in r for x in ["manager","lead"]): return 50
+                            return 10
+                        individual = max(contacts, key=lambda c: _role_score(c.role))
+                    else:
+                        results.append({
+                            "status": "error",
+                            "company_id": comp_id,
+                            "company_name": company.name,
+                            "error": f"No contacts found for {company.name}",
+                        })
+                        continue
 
                 if not individual:
-                    return {"status": "error", "individual_id": ind_id, "error": "Individual not found"}
-                if not company:
-                    return {"status": "error", "company_id": comp_id, "error": "Company not found"}
+                    results.append({"status": "error", "error": "No individual or company specified"})
+                    continue
 
-                individual.company = company
+                if not company and individual.company_id:
+                    company = await task_db.get(Company, individual.company_id)
+
+                if not company:
+                    # Create a minimal placeholder company for standalone individuals
+                    company = Company(
+                        name=individual.name + " (Individual)",
+                        description=f"Independent contact: {individual.role or 'Domain expert'}",
+                    )
+                    task_db.add(company)
+                    await task_db.flush()
+
+                # Set company name on individual for safe access in analysis
+                individual._company_name = company.name
 
                 result = await generate_email_for_target(
                     individual=individual,
@@ -538,8 +596,16 @@ async def batch_generate_emails(
                     force_refresh_analysis=force_refresh_analysis,
                 )
                 await task_db.commit()
-                return result
+                results.append(result)
 
-    results = await asyncio.gather(*[_generate_one(pair) for pair in target_pairs])
+        except Exception as e:
+            import logging
+            logging.getLogger("email_gen").error(f"Error generating email for ind={ind_id} comp={comp_id}: {e}", exc_info=True)
+            results.append({
+                "status": "error",
+                "individual_id": ind_id,
+                "company_id": comp_id,
+                "error": str(e),
+            })
 
-    return list(results)
+    return results

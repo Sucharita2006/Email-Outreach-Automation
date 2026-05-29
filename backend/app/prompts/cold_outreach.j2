@@ -25,7 +25,20 @@ Recent news: {{ company_analysis.news_hook }}
 {% endif %}
 
 {% if previous_contact %}
+{% if previous_contact.user_feedback %}
+=== REGENERATION REQUEST ===
+The user reviewed a previous draft and wants changes. Here is the previous email:
+
+Previous Subject: {{ previous_contact.previous_subject }}
+Previous Body:
+{{ previous_contact.previous_body }}
+
+USER'S REQUESTED CHANGES: {{ previous_contact.user_feedback }}
+
+IMPORTANT: Rewrite the email incorporating the user's feedback. Keep the same recipient and context but apply the requested changes.
+{% else %}
 Prior contact: We emailed {{ target.name }} on {{ previous_contact.date }}. They {{ "replied" if previous_contact.replied else "did not reply" }}. Reference this naturally.
+{% endif %}
 {% endif %}
 
 === EMAIL STRUCTURE ===

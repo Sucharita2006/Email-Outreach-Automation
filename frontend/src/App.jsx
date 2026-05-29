@@ -2,7 +2,7 @@ import { useState } from 'react';
 import './index.css';
 import { ToastProvider } from './components';
 import { Dashboard, Companies, Individuals } from './pages/Targets';
-import { Generate, Drafts } from './pages/Emails';
+import { Generate, Campaigns } from './pages/Emails';
 import { Tracking, ReplyTracker } from './pages/Tracking';
 
 const NAV = [
@@ -10,27 +10,21 @@ const NAV = [
   { id: 'companies',   label: 'Companies',        icon: '🏢', section: 'TARGETS' },
   { id: 'individuals', label: 'Individuals',      icon: '👤', section: 'TARGETS' },
   { id: 'generate',    label: 'Generate Email',   icon: '✨', section: 'OUTREACH' },
-  { id: 'drafts',      label: 'Email Drafts',     icon: '📬', section: 'OUTREACH' },
+  { id: 'campaigns',   label: 'Campaigns',        icon: '🗂️', section: 'OUTREACH' },
   { id: 'tracking',    label: 'Tracking',         icon: '📊', section: 'FOLLOW-UP' },
   { id: 'replies',     label: 'Log Reply',        icon: '✍️', section: 'FOLLOW-UP' },
 ];
 
 function App() {
   const [page, setPage] = useState('dashboard');
+  const [pageProps, setPageProps] = useState({});
 
-  const renderPage = () => {
-    switch (page) {
-      case 'dashboard':   return <Dashboard />;
-      case 'companies':   return <Companies />;
-      case 'individuals': return <Individuals />;
-      case 'generate':    return <Generate />;
-      case 'drafts':      return <Drafts />;
-      case 'tracking':    return <Tracking />;
-      case 'replies':     return <ReplyTracker />;
-      default:            return <Dashboard />;
-    }
+  const navigate = (id, props = {}) => {
+    setPage(id);
+    setPageProps(props);
   };
 
+  // Pages are now rendered persistently below to prevent unmounting and cancelling background tasks.
   const sections = [...new Set(NAV.map(n => n.section))];
 
   return (
@@ -53,7 +47,7 @@ function App() {
                   <button
                     key={item.id}
                     className={`nav-item${page === item.id ? ' active' : ''}`}
-                    onClick={() => setPage(item.id)}
+                    onClick={() => navigate(item.id)}
                   >
                     <span className="nav-icon">{item.icon}</span>
                     <span>{item.label}</span>
@@ -76,7 +70,13 @@ function App() {
 
         {/* Main Content */}
         <main className="main-content">
-          {renderPage()}
+          <div style={{ display: page === 'dashboard' ? 'block' : 'none' }}><Dashboard navigate={navigate} /></div>
+          <div style={{ display: page === 'companies' ? 'block' : 'none' }}><Companies navigate={navigate} /></div>
+          <div style={{ display: page === 'individuals' ? 'block' : 'none' }}><Individuals navigate={navigate} /></div>
+          <div style={{ display: page === 'generate' ? 'block' : 'none' }}><Generate navigate={navigate} /></div>
+          <div style={{ display: page === 'campaigns' ? 'block' : 'none' }}><Campaigns {...pageProps} navigate={navigate} /></div>
+          <div style={{ display: page === 'tracking' ? 'block' : 'none' }}><Tracking navigate={navigate} /></div>
+          <div style={{ display: page === 'replies' ? 'block' : 'none' }}><ReplyTracker navigate={navigate} /></div>
         </main>
       </div>
     </ToastProvider>

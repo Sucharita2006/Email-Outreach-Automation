@@ -18,9 +18,15 @@ async function request(path, options = {}) {
   return res.json();
 }
 
-const get  = (path, params) => request(path + (params ? '?' + new URLSearchParams(params).toString() : ''));
+const get = (path, params) => {
+  if (!params) return request(path);
+  const clean = Object.fromEntries(Object.entries(params).filter(([_, v]) => v != null));
+  const query = new URLSearchParams(clean).toString();
+  return request(path + (query ? '?' + query : ''));
+};
 const post = (path, body)   => request(path, { method: 'POST', body: body != null ? JSON.stringify(body) : undefined });
 const patch = (path, body)  => request(path, { method: 'PATCH', body: JSON.stringify(body) });
+const del  = (path)         => request(path, { method: 'DELETE' });
 
 // ── Targets ───────────────────────────────────────────────
 export const api = {
@@ -29,7 +35,13 @@ export const api = {
   getCompany:   (id)     => get(`/targets/companies/${id}`),
   createCompany:(data)   => post('/targets/companies', data),
   updateCompany:(id, d)  => patch(`/targets/companies/${id}`, d),
-  searchCompanies:(q)    => get('/targets/companies/search', { q, limit: 20 }),
+  searchCompanies:(q, type) => {
+    const params = { limit: 50 };
+    if (type === 'domain_tag') params.domain_tag = q;
+    else if (type === 'website') params.website = q;
+    else params.search = q;
+    return get('/targets/companies', params);
+  },
   getStats:     ()       => get('/targets/stats'),
 
   // Individuals
@@ -69,7 +81,8 @@ export const api = {
 
   updateEmail:   (id, d) => patch(`/emails/${id}`, d),
   approveEmail:  (id)    => post(`/emails/${id}/approve`),
-  regenerateEmail:(id, fr)=> post(`/emails/${id}/regenerate${fr ? '?force_refresh_analysis=true' : ''}`),
+  deleteEmail:   (id)    => del(`/emails/${id}`),
+  regenerateEmail:(id, feedback) => post(`/emails/${id}/regenerate`, { user_feedback: feedback || null }),
   exportEmail:   (id)    => get(`/emails/${id}/export`, { format: 'text' }),
 
   // Tracking
