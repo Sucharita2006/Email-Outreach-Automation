@@ -215,7 +215,7 @@ export function Companies() {
       ) : !companies?.length ? (
         <EmptyState icon="🏢" title="No companies found" text="Seed the database or add companies manually." />
       ) : (
-        <ScrollArea className="flex-1 w-full rounded-md border border-white/10 bg-black/20">
+        <div className="flex-1 w-full rounded-md border border-white/10 bg-black/20 overflow-y-auto relative">
           <div className="table-wrapper">
             <table>
               <thead>
@@ -269,7 +269,7 @@ export function Companies() {
               </tbody>
             </table>
           </div>
-        </ScrollArea>
+        </div>
       )}
 
       {/* Company Detail Modal */}
@@ -368,7 +368,7 @@ export function Individuals() {
       ) : !individuals?.length ? (
         <EmptyState icon="👤" title="No individuals found" text="Seed the database to add contacts." />
       ) : (
-        <ScrollArea className="flex-1 w-full rounded-md border border-white/10 bg-black/20">
+        <div className="flex-1 w-full rounded-md border border-white/10 bg-black/20 overflow-y-auto relative">
           <div className="table-wrapper">
             <table>
               <thead>
@@ -412,7 +412,7 @@ export function Individuals() {
               </tbody>
             </table>
           </div>
-        </ScrollArea>
+        </div>
       )}
 
       <Modal open={!!selected} onClose={() => setSelected(null)} title={selected?.name}>

@@ -939,7 +939,7 @@ function CampaignList({ onSelect }) {
       {!campaigns?.length ? (
         <EmptyState icon="📋" title="No campaigns yet" text="Create a campaign from the Generate page." />
       ) : (
-        <ScrollArea className="flex-1 w-full rounded-md border border-white/10 bg-black/20">
+        <div className="flex-1 w-full rounded-md border border-white/10 bg-black/20 overflow-y-auto relative">
           <div className="table-wrapper">
             <table>
               <thead>
@@ -962,7 +962,7 @@ function CampaignList({ onSelect }) {
               </tbody>
             </table>
           </div>
-        </ScrollArea>
+        </div>
       )}
     </div>
   );
@@ -980,11 +980,15 @@ function CampaignDetail({ campaignId, onBack }) {
   const [editBody, setEditBody] = useState('');
   const [editRecipientEmail, setEditRecipientEmail] = useState('');
   const [saving, setSaving] = useState(false);
+  const [showRegeneratePrompt, setShowRegeneratePrompt] = useState(false);
+  const [regenerateFeedback, setRegenerateFeedback] = useState('');
+  const [regeneratingTargetId, setRegeneratingTargetId] = useState(null);
 
   // Selection & Generation for Targets tab
   const [selectedCompanyIds, setSelectedCompanyIds] = useState(new Set());
   const [selectedIndividualIds, setSelectedIndividualIds] = useState(new Set());
   const [generating, setGenerating] = useState(false);
+  const [polling, setPolling] = useState(false);
   // Fetch data
   const { data: campaign, loading: campLoading } = useApi(async () => {
     const list = await api.getCampaigns();
@@ -999,12 +1003,27 @@ function CampaignDetail({ campaignId, onBack }) {
     [campaignId, statusFilter]
   );
 
+  const handleRefresh = async () => {
+    setPolling(true);
+    try {
+      await api.pollGmail(campaignId);
+    } catch (e) {
+      console.error('Failed to poll Gmail:', e);
+    } finally {
+      setPolling(false);
+      reloadEmails();
+    }
+  };
+
   const openDetail = (email) => {
     setSelectedEmail(email);
     setEditMode(false);
     setEditSubject(email.subject || '');
     setEditBody(email.body || '');
     setEditRecipientEmail(email.recipient_email || '');
+    setShowRegeneratePrompt(false);
+    setRegenerateFeedback('');
+    setRegeneratingTargetId(null);
   };
 
   const save = async () => {
@@ -1038,13 +1057,45 @@ function CampaignDetail({ campaignId, onBack }) {
     } catch (e) { toast(e.message, 'error'); }
   };
 
+  const pollRegeneration = (targetId, oldEmailId) => {
+    let attempts = 0;
+    const interval = setInterval(async () => {
+      attempts++;
+      if (attempts > 30) {
+        clearInterval(interval);
+        setRegeneratingTargetId(null);
+        toast("Regeneration timed out", "error");
+        return;
+      }
+      try {
+        const latestEmails = await api.getEmails({ campaign_id: campaignId });
+        const newEmail = latestEmails.find(e => e.target_id === targetId && e.id !== oldEmailId && e.status !== 'archived');
+        if (newEmail) {
+          clearInterval(interval);
+          setRegeneratingTargetId(null);
+          setSelectedEmail(newEmail);
+          reloadEmails();
+          toast("Draft regenerated successfully!", "success");
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    }, 3000);
+  };
+
   const regenerate = async (id) => {
     try {
-      await api.regenerateEmail(id);
-      toast('Regenerating draft…', 'info');
-      setSelectedEmail(null);
-      reloadEmails();
-    } catch (e) { toast(e.message, 'error'); }
+      const targetId = selectedEmail.target_id;
+      setRegeneratingTargetId(targetId);
+      await api.regenerateEmail(id, regenerateFeedback);
+      toast('Regenerating draft in background…', 'info');
+      setShowRegeneratePrompt(false);
+      setRegenerateFeedback('');
+      pollRegeneration(targetId, id);
+    } catch (e) { 
+      setRegeneratingTargetId(null);
+      toast(e.message, 'error'); 
+    }
   };
 
   const generateSelected = async () => {
@@ -1249,13 +1300,15 @@ function CampaignDetail({ campaignId, onBack }) {
               <option value="IGNORED">Ignored</option>
               <option value="FOLLOW_UP_SENT">Follow-up Sent</option>
             </select>
-            <button className="btn btn-secondary btn-sm" onClick={reloadEmails}>🔄</button>
+            <button className="btn btn-secondary btn-sm" disabled={polling} onClick={handleRefresh}>
+              {polling ? <Spinner /> : '🔄'}
+            </button>
           </div>
           
           {emailsLoading ? <Spinner /> : !emails?.length ? (
             <EmptyState icon="📬" title="No emails yet" text="No emails drafted for this campaign." />
           ) : (
-            <ScrollArea className="flex-1 w-full rounded-md border border-white/10 bg-black/20">
+            <div className="flex-1 w-full rounded-md border border-white/10 bg-black/20 overflow-y-auto relative">
               <div className="table-wrapper">
                 <table>
                   <thead>
@@ -1293,16 +1346,23 @@ function CampaignDetail({ campaignId, onBack }) {
                   </tbody>
                 </table>
               </div>
-            </ScrollArea>
+            </div>
           )}
         </div>
       )}
 
       {/* Email Detail Modal */}
-      <Modal open={!!selectedEmail} onClose={() => setSelectedEmail(null)} title="Email Draft" size="xl">
+      <Modal open={!!selectedEmail} onClose={() => { setSelectedEmail(null); setShowRegeneratePrompt(false); setRegenerateFeedback(''); setRegeneratingTargetId(null); }} title="Email Draft" size="xl">
         {selectedEmail && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <div className="flex justify-between items-center">
+            {regeneratingTargetId === selectedEmail.target_id ? (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 200 }}>
+                 <Spinner size="lg" />
+                 <div className="mt-4 text-muted">Regenerating email... This may take up to a minute.</div>
+              </div>
+            ) : (
+              <>
+                <div className="flex justify-between items-center">
               <div className="flex gap-2 items-center">
                 <StatusBadge status={selectedEmail.status} />
                 <span className="text-xs text-muted">{fmtDate(selectedEmail.drafted_at)}</span>
@@ -1318,7 +1378,7 @@ function CampaignDetail({ campaignId, onBack }) {
                     {selectedEmail.status === 'drafted' && <button className="btn btn-secondary btn-sm" onClick={() => setEditMode(true)}>✏️ Edit</button>}
                     {selectedEmail.status === 'drafted' && <button className="btn btn-primary btn-sm" onClick={() => approve(selectedEmail.id)}>✅ Approve</button>}
                     {selectedEmail.status === 'drafted' && <button className="btn btn-sm" style={{ background: 'linear-gradient(135deg, #3b82f6, #2563eb)', color: 'white', border: 'none' }} onClick={() => sendDirectly(selectedEmail.id)}>🚀 Send Directly</button>}
-                    <button className="btn btn-secondary btn-sm" onClick={() => regenerate(selectedEmail.id)}>🔄 Regenerate</button>
+                    <button className="btn btn-secondary btn-sm" onClick={() => setShowRegeneratePrompt(true)}>🔄 Regenerate</button>
                     <PushToGmailButton emailId={selectedEmail.id} />
                   </>
                 )}
@@ -1346,12 +1406,29 @@ function CampaignDetail({ campaignId, onBack }) {
                   <textarea className="form-textarea" style={{ minHeight: 240 }} value={editBody} onChange={e => setEditBody(e.target.value)} />
                 </div>
               </>
+            ) : showRegeneratePrompt ? (
+              <div className="form-group" style={{ marginTop: '1rem' }}>
+                <label className="form-label">Regeneration Instructions (Optional)</label>
+                <textarea 
+                  className="form-textarea" 
+                  style={{ minHeight: 100 }} 
+                  placeholder="e.g. Make it shorter, focus more on our partnership..."
+                  value={regenerateFeedback}
+                  onChange={e => setRegenerateFeedback(e.target.value)}
+                />
+                <div className="flex gap-2 mt-2">
+                  <button className="btn btn-primary btn-sm" onClick={() => regenerate(selectedEmail.id)}>Confirm Regenerate</button>
+                  <button className="btn btn-secondary btn-sm" onClick={() => { setShowRegeneratePrompt(false); setRegenerateFeedback(''); }}>Cancel</button>
+                </div>
+              </div>
             ) : (
               <>
                 <div className="email-subject">{selectedEmail.subject || 'No subject'}</div>
                 <div className="email-preview">{selectedEmail.body || 'No body'}</div>
                 <CopyButton text={`Subject: ${selectedEmail.subject}\n\n${selectedEmail.body}`} label="Copy Full Email" />
               </>
+            )}
+            </>
             )}
           </div>
         )}

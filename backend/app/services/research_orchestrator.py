@@ -180,9 +180,13 @@ async def run_company_analysis(
         web_intelligence = company.serper_web_cache.get("intelligence", "Not available")
 
     # ── Build context for prompt ──────────────────────────────
+    company_name = company.name
+    if company_name and company_name.endswith(" (Individual)"):
+        company_name = company_name.replace(" (Individual)", "")
+
     company_ctx = {
-        "name": company.name,
-        "legal_name": company.name,
+        "name": company_name,
+        "legal_name": company_name,
         "company_type": company.company_type or "Company",
         "jurisdiction_code": company.jurisdiction_code or "Unknown",
         "sector": company.sector or "Unknown",

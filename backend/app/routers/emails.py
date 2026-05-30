@@ -19,7 +19,7 @@ import json
 from datetime import datetime, timezone
 from typing import Optional, AsyncGenerator
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Body
+from fastapi import APIRouter, Depends, HTTPException, Query, Body, BackgroundTasks
 from fastapi.responses import StreamingResponse, PlainTextResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -428,32 +428,55 @@ class RegenerateRequest(BaseModel):
     user_feedback: Optional[str] = None
 
 
+async def _regenerate_email_task(
+    target_id: str,
+    company_name: str,
+    campaign_id: str,
+    force_refresh_analysis: bool,
+    previous_context: dict,
+):
+    from app.database.session import AsyncSessionLocal
+    
+    async with AsyncSessionLocal() as task_db:
+        individual = await task_db.get(Individual, target_id)
+        if not individual:
+            return
+
+        company_stmt = select(Company).where(Company.name == company_name)
+        comp_result = await task_db.execute(company_stmt)
+        company = comp_result.scalars().first()
+        if not company:
+            return
+
+        individual.company = company
+        campaign = await task_db.get(OutreachCampaign, campaign_id)
+
+        await research_orchestrator.generate_email_for_target(
+            individual=individual,
+            company=company,
+            campaign_id=campaign_id,
+            campaign_purpose=campaign.purpose if campaign else "",
+            db=task_db,
+            force_refresh_analysis=force_refresh_analysis,
+            previous_contact=previous_context,
+        )
+        await task_db.commit()
+
+
 @router.post("/{email_id}/regenerate")
 async def regenerate_email(
     email_id: str,
+    background_tasks: BackgroundTasks,
     body: RegenerateRequest = RegenerateRequest(),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Regenerate an email draft using the LLM.
-    Optionally accepts user_feedback to guide the regeneration.
-    Uses cached analysis unless force_refresh_analysis=True.
-    Archives the old draft and creates a new one.
+    Regenerate an email draft using the LLM in the background.
+    Archives the old draft and creates a new one asynchronously.
     """
     old_email = await _get_email_or_404(email_id, db)
 
-    # Load individual + company
-    individual = await _get_individual_or_404(old_email.target_id, db)
-    company_stmt = select(Company).where(Company.name == old_email.company_name)
-    comp_result = await db.execute(company_stmt)
-    company = comp_result.scalar_one_or_none()
-
-    if not company:
-        raise HTTPException(status_code=404, detail="Company not found for this email.")
-
-    individual.company = company
-
-    # Archive the old draft
+    # Archive the old draft instantly
     old_email.status = EmailStatus.ARCHIVED
     old_email.archived_at = datetime.now(timezone.utc).replace(tzinfo=None)
     await db.flush()
@@ -467,22 +490,19 @@ async def regenerate_email(
             "user_feedback": body.user_feedback,
         }
 
-    # Load campaign to get purpose
-    campaign = await _get_campaign_or_404(old_email.campaign_id, db)
-
-    # Generate new draft
-    result = await research_orchestrator.generate_email_for_target(
-        individual=individual,
-        company=company,
+    # Spawn background task
+    background_tasks.add_task(
+        _regenerate_email_task,
+        target_id=old_email.target_id,
+        company_name=old_email.company_name,
         campaign_id=old_email.campaign_id,
-        campaign_purpose=campaign.purpose or "",
-        db=db,
         force_refresh_analysis=body.force_refresh_analysis,
-        previous_contact=previous_context,
+        previous_context=previous_context,
     )
+    
     await db.commit()
 
-    return {**result, "archived_email_id": email_id}
+    return {"status": "processing", "message": "Email is regenerating in the background."}
 
 
 # ════════════════════════════════════════════════════════════

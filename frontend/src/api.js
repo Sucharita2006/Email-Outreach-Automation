@@ -4,11 +4,15 @@ const BASE_URL = import.meta.env.VITE_API_URL || '';
 async function request(path, options = {}) {
   const url = `${BASE_URL}${path}`;
   const apiKey = import.meta.env.VITE_API_KEY;
-  const headers = { 'Content-Type': 'application/json', ...options.headers };
+  const headers = { 
+    'Content-Type': 'application/json', 
+    ...options.headers 
+  };
   if (apiKey) headers['X-API-Key'] = apiKey;
 
   const res = await fetch(url, {
     headers,
+    cache: 'no-store',
     ...options,
   });
   if (!res.ok) {

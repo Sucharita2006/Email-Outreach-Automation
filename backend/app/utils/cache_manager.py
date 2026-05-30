@@ -28,9 +28,8 @@ def is_cache_fresh(cached_at: Optional[datetime], ttl_seconds: int) -> bool:
     if cached_at is None:
         return False
 
-    # Make timezone-aware if naive
-    if cached_at.tzinfo is None:
-        cached_at = cached_at.replace(tzinfo=timezone.utc)
+    if cached_at.tzinfo is not None:
+        cached_at = cached_at.replace(tzinfo=None)
 
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     age_seconds = (now - cached_at).total_seconds()
@@ -41,6 +40,6 @@ def cache_age_hours(cached_at: Optional[datetime]) -> Optional[float]:
     """Returns how many hours ago the cache was populated, or None if never cached."""
     if cached_at is None:
         return None
-    if cached_at.tzinfo is None:
-        cached_at = cached_at.replace(tzinfo=timezone.utc)
+    if cached_at.tzinfo is not None:
+        cached_at = cached_at.replace(tzinfo=None)
     return (datetime.now(timezone.utc).replace(tzinfo=None) - cached_at).total_seconds() / 3600

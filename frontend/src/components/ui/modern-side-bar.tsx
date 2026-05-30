@@ -116,7 +116,7 @@ export function Sidebar({ className = "", activeItem, onNavigate, children }: Si
                   WebkitBackgroundClip: 'text',
                   WebkitTextFillColor: 'transparent',
                   backgroundClip: 'text'
-                }}>Advoc AI</span>
+                }}>Outreach AI</span>
               </div>
             </div>
           )}
