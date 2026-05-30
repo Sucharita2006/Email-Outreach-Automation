@@ -301,18 +301,28 @@ export function Tracking() {
                 </p>
                 <div style={{ position: 'relative', zIndex: 10 }}>
                   {!gmailStatus?.authenticated ? (
-                    <button className="btn btn-secondary btn-sm" style={{ position: 'relative', zIndex: 10 }} onClick={async (e) => {
-                      e.stopPropagation();
+                    <button className="btn btn-primary btn-sm" onClick={async () => {
                       try {
                         const r = await api.gmailAuthorize();
-                        if (r.url) window.open(r.url, '_blank');
+                        if (r.url) window.location.href = r.url;
                         else toast(r.message || 'Gmail not configured', 'error');
                       } catch (err) {
                         toast(err.message || 'Failed to connect Gmail', 'error');
                       }
                     }}>🔗 Connect Gmail</button>
                   ) : (
-                    <button className="btn btn-secondary btn-sm" onClick={pollGmail}>📥 Poll Inbox</button>
+                    <>
+                      <button className="btn btn-secondary btn-sm" onClick={pollGmail}>📥 Poll Inbox</button>
+                      <button className="btn btn-ghost btn-sm" style={{ color: 'var(--status-ignored)' }} onClick={async () => {
+                        try {
+                          await api.gmailDisconnect();
+                          toast('Gmail disconnected successfully.', 'success');
+                          window.location.reload();
+                        } catch (err) {
+                          toast(err.message || 'Failed to disconnect Gmail', 'error');
+                        }
+                      }}>🔌 Sign Out</button>
+                    </>
                   )}
                 </div>
               </div>

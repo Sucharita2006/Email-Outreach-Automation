@@ -1,4 +1,4 @@
-import { useState, Fragment } from 'react';
+import { useState, useEffect, Fragment } from 'react';
 import api from '../api';
 import { useToast, StatusBadge, Spinner, EmptyState, Modal, CopyButton, ConfirmButton, useApi, fmtDate, fmtRelative, truncate } from '../components';
 import { Building, Users, Mail, MessageSquare, AlertCircle, Briefcase, Rocket, FolderOpen } from 'lucide-react';
@@ -587,6 +587,7 @@ export function Generate() {
                 key={r.email_id || idx}
                 result={r}
                 idx={idx}
+                campaignId={campaignId}
                 selected={selectedResultIds.has(r.email_id)}
                 onToggle={() => toggleResultId(r.email_id)}
                 onDeleted={() => {
@@ -595,15 +596,13 @@ export function Generate() {
                 }}
                 onRegenerated={(newResult) => {
                   setGenResults(prev => prev.map((p, i) => i === idx ? { ...newResult, individual_name: p.individual_name, company_name: p.company_name } : p));
-                  toast('Email regenerated!', 'success');
+                  if (newResult.status === 'ok') {
+                    toast('Email regenerated!', 'success');
+                  }
                 }}
               />
             )
           ))}
-
-          <div style={{ textAlign: 'center', paddingBottom: 20 }}>
-            <a href="#drafts" className="btn btn-secondary btn-sm">View All Drafts →</a>
-          </div>
         </div>
         </ScrollArea>
       )}
@@ -615,7 +614,7 @@ export function Generate() {
 // ════════════════════════════════════════════════════════════
 //  EmailResultCard — Individual email card with Save/Delete/Regenerate
 // ════════════════════════════════════════════════════════════
-function EmailResultCard({ result: r, idx, onDeleted, onRegenerated, selected, onToggle }) {
+function EmailResultCard({ result: r, idx, onDeleted, onRegenerated, selected, onToggle, campaignId }) {
   const toast = useToast();
   const [deleting, setDeleting] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
@@ -628,6 +627,36 @@ function EmailResultCard({ result: r, idx, onDeleted, onRegenerated, selected, o
   const [saving, setSaving] = useState(false);
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(r.status === 'SENT');
+
+  // Poll for regenerated email when status is processing
+  useEffect(() => {
+    if (r.status !== 'processing' || !campaignId) return;
+    
+    const targetId = r.individual_id || r.company_id;
+    const interval = setInterval(async () => {
+      try {
+        const latestEmails = await api.getEmails({ campaign_id: campaignId });
+        const newEmail = latestEmails.find(e => e.target_id === targetId && e.id !== r.email_id && e.status !== 'archived');
+        
+        if (newEmail) {
+          clearInterval(interval);
+          onRegenerated({
+            ...r,
+            email_id: newEmail.id,
+            subject: newEmail.subject,
+            body: newEmail.body,
+            status: 'ok',
+            recipient_name: newEmail.recipient_name || r.individual_name,
+            company_name: newEmail.company_name || r.company_name
+          });
+        }
+      } catch (e) {
+        console.error("Polling error:", e);
+      }
+    }, 3000);
+    
+    return () => clearInterval(interval);
+  }, [r.status, r.email_id, r.individual_id, r.company_id, campaignId, onRegenerated]);
 
   const handleSave = async () => {
     if (!r.email_id) return;
@@ -707,7 +736,7 @@ function EmailResultCard({ result: r, idx, onDeleted, onRegenerated, selected, o
           background: r.status === 'ok' ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)',
           color: r.status === 'ok' ? '#22c55e' : '#ef4444',
         }}>
-          {r.status === 'ok' ? '✓' : '✗'}
+          {r.status === 'ok' ? '✓' : r.status === 'processing' ? <Spinner size="sm" /> : '✗'}
         </span>
         <div>
           <div style={{ fontWeight: 600 }}>
@@ -723,7 +752,12 @@ function EmailResultCard({ result: r, idx, onDeleted, onRegenerated, selected, o
       </div>
 
       {/* Email Content */}
-      {r.status === 'ok' ? (
+      {r.status === 'processing' ? (
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: 150 }}>
+           <Spinner size="md" />
+           <div className="mt-4 text-muted text-sm">Regenerating email... This may take up to a minute.</div>
+        </div>
+      ) : r.status === 'ok' ? (
         <>
           {editing ? (
             <div style={{ padding: '10px 0', display: 'flex', flexDirection: 'column', gap: 12 }}>

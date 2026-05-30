@@ -105,6 +105,7 @@ export const api = {
   sendEmailDirectly:(id)   => post(`/tracking/${id}/send-directly`),
   gmailStatus:     ()      => get('/auth/gmail/status'),
   gmailAuthorize:  ()      => get('/auth/gmail/authorize'),
+  gmailDisconnect: ()      => post('/auth/gmail/disconnect'),
   pollGmail:       (cid)   => post(`/tracking/poll-gmail${cid ? '?campaign_id='+cid : ''}`),
 };
 

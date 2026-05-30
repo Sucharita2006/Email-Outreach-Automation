@@ -184,6 +184,20 @@ async def _get_gmail_service():
         raise RuntimeError("Install: pip install google-api-python-client google-auth")
 
 
+async def disconnect() -> bool:
+    """Disconnect Gmail by removing tokens from the database and cache."""
+    await _load_token_store()
+    _token_store.pop("credentials", None)
+    
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(SystemSetting).where(SystemSetting.key == "gmail_tokens"))
+        setting = result.scalar_one_or_none()
+        if setting:
+            await db.delete(setting)
+            await db.commit()
+    return True
+
+
 async def is_authenticated() -> bool:
     """Return True if Gmail OAuth tokens are available."""
     await _load_token_store()

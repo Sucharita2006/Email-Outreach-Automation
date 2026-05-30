@@ -1,328 +1,153 @@
-# 🌱 OutreachAI — Animal Advocacy Email Outreach Automation
+# Outreach AI: Automated Partnership & Advocacy Pipeline
 
-> **Open-source MVP** that takes an animal advocacy nonprofit from zero to a personalized outreach email draft in minutes — powered by AI, enriched by real data, always reviewed by humans before sending.
+A full-stack, AI-driven platform that automates partnership outreach for mission-driven organizations. Outreach AI discovers relevant organizations, identifies key decision-makers, and generates highly personalized outreach emails using multi-stage LLM reasoning — empowering advocacy groups to scale their impact without losing the human touch.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Python 3.11+](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://python.org)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688.svg)](https://fastapi.tiangolo.com)
-[![React](https://img.shields.io/badge/React-18+-61dafb.svg)](https://react.dev)
+![Python](https://img.shields.io/badge/Python-3.10+-blue.svg) ![FastAPI](https://img.shields.io/badge/FastAPI-0.104-green.svg) ![React](https://img.shields.io/badge/React-18-blue.svg) ![PostgreSQL](https://img.shields.io/badge/Database-PostgreSQL-336791.svg)
 
 ---
 
-## 🎯 What It Does
+## 🌍 Why Outreach AI Matters
 
-OutreachAI automates the most time-consuming parts of cold outreach:
+Building meaningful partnerships is critical for advocacy groups and non-profits, but finding the right organizations, hunting down decision-makers, and writing custom emails is incredibly time-consuming. 
 
+Traditional mass-email campaigns rely on generic templates that end up in spam. Conversely, manually researching and writing highly personalized emails to hundreds of targets simply doesn't scale.
+
+**Outreach AI introduces an automated robotic SDR pipeline that:**
+- **Continuously discovers** relevant organizations based on your specific advocacy domain (e.g., animal welfare, alternative proteins).
+- **Aggregates live intelligence** from web searches, news articles, and business registries to understand *why* a target is relevant.
+- **Finds the right people** by automatically locating key decision-makers and their verified contact information.
+- **Generates hyper-personalized drafts** using a 3-stage LLM reasoning pipeline to tailor the message specifically to the target's recent news, background, and personality.
+- **Tracks engagement automatically** by connecting directly to Gmail to monitor replies and schedule follow-ups.
+
+By combining deterministic data aggregation with LLM semantic reasoning, Outreach AI delivers **true personalization at scale** — giving resource-constrained organizations the leverage they need to build real partnerships.
+
+---
+
+## 🚀 Core Features
+
+### 🔍 Automated Target Discovery
+Tell the system your campaign domain (e.g., "veganism"), and the multi-threaded discovery engine gets to work:
+- Scours the web (via Serper) for organizations active in your space.
+- Cross-references with Hunter.io to find actual humans and verified emails.
+- Pulls company registry data (via OpenCorporates) for deep organizational context.
+- Stores everything in a PostgreSQL database for easy curation.
+
+### 🧠 Three-Call LLM Personalization Pipeline
+Outreach AI separates research from drafting to ensure maximum relevance.
+1. **Call 1 — Individual Analysis:** The LLM analyzes the person's role, background, and personality (via Humantic AI integration) to determine the best tone (e.g., DISC personality matching).
+2. **Call 2 — Company Analysis:** The LLM reviews recent news and the company's mission to find the perfect "hook" aligning with your non-profit's goals.
+3. **Call 3 — Synthesis & Drafting:** A final LLM call merges these insights into a highly personalized, compelling email draft.
+
+### 🔁 Human-in-the-Loop Regeneration
+Never send a robotic-sounding email. If a draft isn't quite right:
+- Click **Regenerate** and provide a quick natural-language instruction (e.g., *"Make it sound more urgent and mention our new sanctuary"*).
+- The AI runs in a FastAPI background task to avoid timeouts, then automatically refreshes the frontend modal with the new draft.
+
+### 📧 Gmail Integration & Reply Tracking
+Complete the loop without leaving the dashboard:
+- **OAuth Integration:** Securely connect your Gmail account.
+- **Direct Sending:** Push approved drafts directly to your Gmail outbox.
+- **Automated Polling:** The system polls your inbox to match replies to your sent emails, automatically updating the status to "Replied" or "Bounced".
+- **Smart Follow-ups:** A scheduled background job (APScheduler) generates highly-contextual follow-up drafts for targets who haven't replied after 7 days.
+
+### 📈 Interactive Glassmorphic Dashboard
+A modern, animated web interface visualizes your outreach pipeline:
+- **Campaign Setup:** Define your mission and discover targets in one click.
+- **Target Curation:** Review discovered companies and individuals with rich context badges and relevance scores.
+- **Draft Review:** Edit, regenerate, and approve emails before they go out.
+- **Follow-up Tracking:** Monitor engagement history and action items in real-time.
+
+---
+
+## 💡 Key Innovation
+
+Most outreach tools are just glorified mail merges — they blast the exact same template to a CSV of emails, occasionally swapping out `{{first_name}}`.
+
+**Outreach AI is an intelligence system.** It acts as an automated researcher and copywriter. 
+The hybrid architecture is the key differentiator:
+- **Hard Data Fetching** (Hunter, Serper, OpenCorporates) ensures you are contacting real people at real companies with factual background info.
+- **Semantic LLM Reasoning** handles the nuance of *why* your organization should partner with them, crafting a narrative that a generic mail merge could never achieve.
+
+---
+
+## 🧠 Technical Architecture
+
+```text
+User Intent (Domain)
+     ↓
+FastAPI Orchestrator (Async)
+     ├── Serper API (Web/News Intelligence)
+     ├── Hunter.io (Email/Contact Discovery)
+     ├── Humantic AI (Personality Analysis)
+     └── OpenCorporates (Business Verification)
+     ↓
+OpenRouter LLM (3-Call Parallel Analysis Pipeline)
+     ↓
+PostgreSQL Database (asyncpg + SQLAlchemy ORM)
+     ↓
+React + Vite Dashboard (Glassmorphic UI)
+     ↓
+Gmail API (Direct Push & Reply Polling)
 ```
-Domain Keyword ("veganism")
-        │
-        ▼
-  🏢 Target Discovery     ← DB fuzzy search + OpenCorporates
-        │
-        ▼
-  🔬 Research Enrichment  ← Hunter.io + Serper news + Humantic AI (DISC)
-        │
-        ▼
-  🤖 3-Call AI Pipeline   ← Call 1: Individual analysis
-        │                    Call 2: Company analysis  
-        │                    Call 3: Draft personalized email
-        ▼
-  👁️ Human Review         ← Edit, approve, or regenerate
-        │
-        ▼
-  📤 Send / Gmail Push    ← Copy-paste or push to Gmail draft
-        │
-        ▼
-  📊 Reply Tracking       ← Log replies, auto-schedule follow-ups
-        │
-        ▼
-  🔄 Follow-up Engine     ← Daily APScheduler job at 08:00 AM
-```
+
+**Backend (`backend/`)**
+- Built with **FastAPI** and **SQLAlchemy** (Async engine).
+- **Database:** PostgreSQL (via `asyncpg`), gracefully falls back to SQLite (`aiosqlite`) for local dev without a Postgres URL.
+- **Background Tasks:** Orchestration of LLM calls to bypass strict cloud timeout limits (like Render's 100s limit).
+- **Intelligent TTL Caching:** Minimizes external API costs by aggressively caching Serper (7 days), Hunter (14 days), and OpenCorporates (30 days) responses.
+
+**Frontend (`frontend/`)**
+- Built with **React 18**, **Vite**, and **Tailwind CSS**.
+- Beautiful, highly responsive Glassmorphic design.
+- Polling mechanisms for seamless background generation updates.
 
 ---
 
-## ✨ Features
-
-| Feature | Description |
-|---|---|
-| 🔍 **Domain Search** | Fuzzy domain keyword search across your company database |
-| 📧 **Email Discovery** | Hunter.io finds and verifies contact emails |
-| 🏢 **Company Enrichment** | OpenCorporates legal data, Serper news intelligence |
-| 🧠 **Personality Profiling** | Humantic AI DISC profiling from LinkedIn URLs |
-| 🤖 **3-Call LLM Pipeline** | Individual → Company → Draft (Claude 3.5 Sonnet via OpenRouter) |
-| 👁️ **Human Review Loop** | Every email reviewed before sending — no auto-send |
-| 📋 **Copy/Paste Export** | One-click copy for Gmail, Outlook, any email client |
-| 📤 **Gmail Push** | OAuth 2.0 integration — push drafts directly to Gmail |
-| 📊 **Reply Tracking** | Log replies, mark as known, full reply history |
-| 🔄 **Follow-up Automation** | Daily scheduled job generates LLM follow-up drafts |
-| 🌐 **React Dashboard** | Full-featured UI with dark glassmorphism design |
-
----
-
-## 🛠️ Tech Stack
-
-### Backend
-| Layer | Technology |
-|---|---|
-| Language | Python 3.11+ |
-| Framework | FastAPI + Uvicorn |
-| ORM | SQLAlchemy 2.0 (async) |
-| Database | SQLite (dev) → PostgreSQL (prod) |
-| Scheduler | APScheduler 3.x |
-| HTTP Client | httpx (async) |
-| Templates | Jinja2 (LLM prompts) |
-
-### Frontend
-| Layer | Technology |
-|---|---|
-| Framework | React 18 + Vite |
-| Styling | Vanilla CSS (dark glassmorphism) |
-| Fonts | Inter + JetBrains Mono |
-| API Client | Fetch + custom hooks |
-
-### External APIs
-| API | Purpose | Free Tier |
-|---|---|---|
-| [OpenRouter](https://openrouter.ai) | LLM (Claude 3.5 Sonnet) | Pay per token |
-| [Hunter.io](https://hunter.io) | Email discovery | 25 req/month |
-| [Serper](https://serper.dev) | Web + news search | 2,500 req/month |
-| [OpenCorporates](https://opencorporates.com) | Company registry | Free tier |
-| [Humantic AI](https://humantic.ai) | Personality profiling | Free trial |
-| [Gmail API](https://developers.google.com/gmail) | Draft push | Free |
-
----
-
-## 🚀 Quick Start
+## 🛠️ Setup Instructions
 
 ### Prerequisites
-- Python 3.11+
+- Python 3.10+
 - Node.js 18+
-- Git
+- [OpenRouter API Key](https://openrouter.ai/) (Required for LLM drafting)
+- (Optional) PostgreSQL database instance
 
-### 1. Clone the Repository
-
+### 1. Clone & Configure
 ```bash
 git clone https://github.com/Sucharita2006/Email-Outreach-Automation.git
 cd Email-Outreach-Automation
+cp backend/.env.example backend/.env
 ```
+*Edit `backend/.env` and add your API keys, non-profit details, and `DATABASE_URL` (e.g., `postgresql://user:pass@localhost:5432/outreach`).*
 
-### 2. Backend Setup
-
-```bash
-# Create and activate virtual environment
-python -m venv venv
-
-# Windows
-venv\Scripts\activate
-
-# macOS / Linux
-source venv/bin/activate
-
-# Install dependencies
-pip install -r requirements.txt
-```
-
-### 3. Configure Environment Variables
-
-```bash
-cp .env.example .env
-```
-
-Edit `.env` and fill in your API keys:
-
-```env
-# Required for email generation
-OPENROUTER_API_KEY=sk-or-...
-
-# Optional — app works without these (graceful fallback)
-HUNTER_API_KEY=your_hunter_key
-SERPER_API_KEY=your_serper_key
-OPENCORPORATES_API_TOKEN=your_oc_token
-HUMANTIC_API_KEY=your_humantic_key
-
-# Your organization details
-NONPROFIT_NAME=Animals First Foundation
-NONPROFIT_MISSION=We advocate for the protection and rights of all animals.
-NONPROFIT_SENDER_NAME=Alex Johnson
-NONPROFIT_SENDER_ROLE=Outreach Coordinator
-```
-
-> **Note:** The app works without any API keys — all enrichment services have graceful fallbacks and email generation will still run if OPENROUTER_API_KEY is set.
-
-### 4. Seed the Database
-
-```bash
-# Seed with 20 bundled alternative protein companies
-python backend/scripts/seed_from_gfi.py
-
-# Or seed from a GFI CSV export
-# Download from: https://gfi.org/resource/alternative-protein-company-database/
-python backend/scripts/seed_from_gfi.py --csv data/gfi_companies.csv
-
-# Reset and re-seed
-python backend/scripts/seed_from_gfi.py --clear
-```
-
-### 5. Start the Backend
-
+### 2. Start the Backend
 ```bash
 cd backend
+pip install -r requirements.txt
+
+# Seed the database with sample data (optional)
+python scripts/seed_from_gfi.py
+
+# Start the server
 uvicorn app.main:app --reload --port 8000
 ```
+*API available at `http://localhost:8000`. Docs at `http://localhost:8000/docs`.*
 
-- API: `http://localhost:8000`
-- Docs: `http://localhost:8000/docs`
-- Health: `http://localhost:8000/health`
-
-### 6. Start the Frontend
-
+### 3. Start the Frontend
 ```bash
 cd frontend
 npm install
 npm run dev
 ```
-
-- App: `http://localhost:5173`
-
----
-
-## 📖 Usage Workflow
-
-### Generate Your First Email
-
-1. **Open** `http://localhost:5173`
-2. **Companies** → verify your target companies are seeded
-3. **Generate Email** → select campaign → select individual + company → click **Generate**
-4. Watch the 3-call pipeline run:
-   - Call 1: Individual personality analysis
-   - Call 2: Company mission fit analysis
-   - Call 3: Final email draft
-5. **Review the draft** → edit if needed → **Copy** or **Push to Gmail**
-
-### Track Replies
-
-1. **Email Drafts** → find your sent email
-2. **Tracking → Log Reply** → mark as replied or ignored
-3. Follow-ups are automatically scheduled (7 days after no reply)
-4. The APScheduler job runs daily at 08:00 AM to generate follow-up drafts
-
-### Connect Gmail (Optional)
-
-1. Set `GMAIL_CLIENT_ID` and `GMAIL_CLIENT_SECRET` in `.env`
-2. **Tracking → Gmail Integration → Connect Gmail**
-3. Authorize via browser
-4. Use **Push to Gmail** on any draft to send with one click
+*App is now live at `http://localhost:5173`.*
 
 ---
 
-## 🗂️ Project Structure
-
-```
-Email-Outreach-Automation/
-├── backend/
-│   ├── app/
-│   │   ├── main.py                    # FastAPI + APScheduler
-│   │   ├── config.py                  # All settings via .env
-│   │   ├── database/
-│   │   │   ├── models.py              # SQLAlchemy models (5 tables)
-│   │   │   └── session.py             # Async DB session
-│   │   ├── routers/
-│   │   │   ├── campaigns.py           # Campaign CRUD
-│   │   │   ├── targets.py             # Company + individual CRUD
-│   │   │   ├── research.py            # 15 enrichment endpoints
-│   │   │   ├── emails.py              # 13 email generation endpoints
-│   │   │   └── tracking.py            # 12 tracking endpoints
-│   │   ├── services/
-│   │   │   ├── llm_service.py         # OpenRouter client
-│   │   │   ├── research_orchestrator.py # 3-call LLM pipeline
-│   │   │   ├── hunter_service.py      # Hunter.io integration
-│   │   │   ├── serper_service.py      # Serper web/news search
-│   │   │   ├── opencorporates_service.py # Company registry
-│   │   │   ├── humantic_service.py    # DISC personality profiling
-│   │   │   ├── gmail_service.py       # Gmail OAuth + draft push
-│   │   │   ├── email_service.py       # Email management layer
-│   │   │   ├── tracker_service.py     # Reply tracking
-│   │   │   └── followup_service.py    # Follow-up generation
-│   │   ├── prompts/
-│   │   │   ├── individual_analysis.j2 # Call 1 prompt
-│   │   │   ├── company_analysis.j2    # Call 2 prompt
-│   │   │   ├── cold_outreach.j2       # Call 3 prompt (email draft)
-│   │   │   └── followup.j2            # Follow-up prompt
-│   │   └── utils/
-│   │       ├── fuzzy_match.py         # rapidfuzz domain search
-│   │       ├── rate_limiter.py        # API rate limiting
-│   │       └── cache_manager.py       # TTL cache logic
-│   ├── scripts/
-│   │   └── seed_from_gfi.py           # Database seeder
-│   └── alembic/                       # DB migrations
-├── frontend/
-│   └── src/
-│       ├── App.jsx                    # Main app + navigation
-│       ├── api.js                     # API client (40+ endpoints)
-│       ├── components.jsx             # Shared UI components
-│       ├── index.css                  # Design system
-│       └── pages/
-│           ├── Targets.jsx            # Dashboard, Companies, Individuals
-│           ├── Emails.jsx             # Generate wizard + Drafts review
-│           └── Tracking.jsx           # Tracking dashboard + Reply logger
-├── data/
-│   ├── seed_data.json                 # 20 companies + 5 individuals
-│   └── domain_tag_map.json            # Product type → domain tag mapping
-├── .env.example                       # All API key placeholders
-├── requirements.txt
-└── README.md
-```
+## 🔮 Future Improvements
+- **Advanced Reply Classification:** Train a lightweight model to automatically categorize replies as *Positive*, *Negative*, or *Forwarded*.
+- **Multi-Channel Sequences:** Expand beyond email to automatically draft LinkedIn connection requests based on the same LLM research profile.
+- **A/B Testing Analytics:** Track open and reply rates across different LLM prompt strategies to mathematically determine which angles convert best.
 
 ---
 
-## 🔑 Environment Variables Reference
-
-| Variable | Required | Description |
-|---|---|---|
-| `OPENROUTER_API_KEY` | ✅ For email gen | OpenRouter LLM access |
-| `HUNTER_API_KEY` | Optional | Email discovery |
-| `SERPER_API_KEY` | Optional | Web/news search |
-| `OPENCORPORATES_API_TOKEN` | Optional | Company registry |
-| `HUMANTIC_API_KEY` | Optional | DISC personality |
-| `GMAIL_CLIENT_ID` | Optional | Gmail OAuth |
-| `GMAIL_CLIENT_SECRET` | Optional | Gmail OAuth |
-| `NONPROFIT_NAME` | Recommended | Your org name in emails |
-| `NONPROFIT_MISSION` | Recommended | Used in LLM prompts |
-| `NONPROFIT_SENDER_NAME` | Recommended | Email sign-off name |
-| `NONPROFIT_SENDER_ROLE` | Recommended | Email sign-off role |
-| `DATABASE_URL` | Auto | `sqlite+aiosqlite:///./outreach.db` |
-| `FOLLOWUP_1_DAYS` | Auto | Days before 1st follow-up (default: 7) |
-| `FOLLOWUP_2_DAYS` | Auto | Days before 2nd follow-up (default: 14) |
-| `LLM_BATCH_CONCURRENCY` | Auto | Parallel LLM calls (default: 10) |
-
----
-
-## 🔒 Security & Ethics
-
-- **No auto-sending** — every email requires human approval before it leaves your system
-- **Draft-only by default** — approve → copy/paste or push to Gmail draft
-- **Never commit `.env`** — it's in `.gitignore`
-- **Rate limiting** — all API calls are rate-limited to respect provider limits
-- **Cache-first** — TTL caching minimizes API costs (30-day OC, 7-day Serper, 14-day Hunter)
-
----
-
-## 🤝 Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
-
----
-
-## 📄 License
-
-MIT License — see [LICENSE](LICENSE)
-
----
-
-## 🙏 Data Sources
-
-- **Primary seed data**: [GFI Alternative Protein Company Database](https://gfi.org/resource/alternative-protein-company-database/) (Free, open-access)
-- **Company data**: [OpenCorporates](https://opencorporates.com)
-- **Contact discovery**: [Hunter.io](https://hunter.io)
-- **News intelligence**: [Serper](https://serper.dev)
-- **Personality data**: [Humantic AI](https://humantic.ai)
+## 📜 License
+This project is released under the MIT License.

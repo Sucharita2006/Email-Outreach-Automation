@@ -222,7 +222,6 @@ export function Companies() {
                 <tr>
                   <th>Company</th>
                   <th>Contact Person</th>
-                  <th>Email</th>
                   <th>Sector</th>
                   <th>Product</th>
                   <th>Status</th>
@@ -249,13 +248,6 @@ export function Companies() {
                             <div className="text-xs text-muted">{bestContact.role || '—'}</div>
                           </>
                         ) : <span className="text-muted">—</span>}
-                      </td>
-                      <td>
-                        {bestContact?.email ? (
-                          <span className="font-mono text-xs">{bestContact.email}</span>
-                        ) : (
-                          <span className="text-xs" style={{ color: '#ef4444' }}>Email not found</span>
-                        )}
                       </td>
                       <td>{c.sector || '—'}</td>
                       <td><span className="text-xs">{c.product_type || '—'}</span></td>

@@ -429,38 +429,71 @@ class RegenerateRequest(BaseModel):
 
 
 async def _regenerate_email_task(
-    target_id: str,
-    company_name: str,
+    old_email_id: str,
+    individual_id: Optional[str],
+    company_id: Optional[str],
     campaign_id: str,
     force_refresh_analysis: bool,
     previous_context: dict,
 ):
+    import logging
+    logger = logging.getLogger("regenerate")
     from app.database.session import AsyncSessionLocal
     
     async with AsyncSessionLocal() as task_db:
-        individual = await task_db.get(Individual, target_id)
-        if not individual:
-            return
+        try:
+            individual = None
+            if individual_id:
+                individual = await task_db.get(Individual, individual_id)
+                if individual and individual.company_id and not company_id:
+                    company_id = individual.company_id
 
-        company_stmt = select(Company).where(Company.name == company_name)
-        comp_result = await task_db.execute(company_stmt)
-        company = comp_result.scalars().first()
-        if not company:
-            return
+            company = None
+            if company_id:
+                company = await task_db.get(Company, company_id)
 
-        individual.company = company
-        campaign = await task_db.get(OutreachCampaign, campaign_id)
+            if not individual and not company:
+                logger.error(f"Regenerate failed: no individual or company found for email {old_email_id}")
+                return
 
-        await research_orchestrator.generate_email_for_target(
-            individual=individual,
-            company=company,
-            campaign_id=campaign_id,
-            campaign_purpose=campaign.purpose if campaign else "",
-            db=task_db,
-            force_refresh_analysis=force_refresh_analysis,
-            previous_contact=previous_context,
-        )
-        await task_db.commit()
+            # If we only have a company but no individual, we can't generate
+            if not individual:
+                logger.error(f"Regenerate failed: no individual found for email {old_email_id}")
+                return
+
+            # If no company found, create a dummy one from the individual
+            if not company and individual:
+                company = Company(name=individual.name + " (Individual)", website=None)
+
+            if individual and company:
+                individual.company = company
+
+            campaign = await task_db.get(OutreachCampaign, campaign_id)
+
+            result = await research_orchestrator.generate_email_for_target(
+                individual=individual,
+                company=company,
+                campaign_id=campaign_id,
+                campaign_purpose=campaign.purpose if campaign else "",
+                db=task_db,
+                force_refresh_analysis=force_refresh_analysis,
+                previous_contact=previous_context,
+            )
+
+            if result.get("status") == "ok":
+                # Only archive the old email AFTER the new one is successfully created
+                old_email = await task_db.get(OutreachEmail, old_email_id)
+                if old_email:
+                    old_email.status = EmailStatus.ARCHIVED
+                    old_email.archived_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                
+                await task_db.commit()
+                logger.info(f"Regeneration succeeded for email {old_email_id} -> new email {result.get('email_id')}")
+            else:
+                logger.error(f"Regeneration LLM failed for email {old_email_id}: {result}")
+        except Exception as e:
+            logger.error(f"Regeneration task crashed for email {old_email_id}: {e}", exc_info=True)
+            await task_db.rollback()
 
 
 @router.post("/{email_id}/regenerate")
@@ -472,14 +505,9 @@ async def regenerate_email(
 ):
     """
     Regenerate an email draft using the LLM in the background.
-    Archives the old draft and creates a new one asynchronously.
+    The old draft is archived ONLY after the new one is successfully created.
     """
     old_email = await _get_email_or_404(email_id, db)
-
-    # Archive the old draft instantly
-    old_email.status = EmailStatus.ARCHIVED
-    old_email.archived_at = datetime.now(timezone.utc).replace(tzinfo=None)
-    await db.flush()
 
     # Build previous context with user feedback
     previous_context = None
@@ -490,17 +518,21 @@ async def regenerate_email(
             "user_feedback": body.user_feedback,
         }
 
-    # Spawn background task
+    # Determine IDs based on target type
+    from app.database.models import TargetType
+    ind_id = old_email.target_id if old_email.target_type == TargetType.INDIVIDUAL else None
+    comp_id = old_email.target_id if old_email.target_type == TargetType.COMPANY else None
+
+    # Spawn background task — old email stays as DRAFTED until new one is ready
     background_tasks.add_task(
         _regenerate_email_task,
-        target_id=old_email.target_id,
-        company_name=old_email.company_name,
+        old_email_id=old_email.id,
+        individual_id=ind_id,
+        company_id=comp_id,
         campaign_id=old_email.campaign_id,
         force_refresh_analysis=body.force_refresh_analysis,
         previous_context=previous_context,
     )
-    
-    await db.commit()
 
     return {"status": "processing", "message": "Email is regenerating in the background."}
 

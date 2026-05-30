@@ -286,15 +286,23 @@ async def send_directly(
 @auth_router.get("/auth/gmail/status")
 async def gmail_auth_status():
     """Check whether Gmail OAuth credentials are configured and authenticated."""
+    is_auth = await gmail_service.is_authenticated()
     return {
         "configured": gmail_service.is_configured(),
-        "authenticated": gmail_service.is_authenticated(),
+        "authenticated": is_auth,
         "message": (
             "Ready to push drafts to Gmail."
-            if gmail_service.is_authenticated()
+            if is_auth
             else "Click Connect Gmail to authorize."
         ),
     }
+
+
+@auth_router.post("/auth/gmail/disconnect")
+async def gmail_disconnect():
+    """Disconnect Gmail and remove saved credentials."""
+    await gmail_service.disconnect()
+    return {"status": "success", "message": "Gmail disconnected successfully."}
 
 
 @auth_router.get("/auth/gmail/authorize")
@@ -317,7 +325,9 @@ async def gmail_callback(
     Exchange authorization code for access + refresh tokens.
     """
     result = await gmail_service.handle_oauth_callback(code=code, state=state)
-    return result
+    from fastapi.responses import RedirectResponse
+    from app.config import settings
+    return RedirectResponse(url=f"{settings.FRONTEND_URL}/tracking")
 
 
 @router.post("/poll-gmail")
